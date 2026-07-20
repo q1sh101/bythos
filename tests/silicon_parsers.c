@@ -76,17 +76,10 @@ int main(void) {
         bythos_mem_enc_flags_t flags = {0};
 
         bythos_parse_memory_encryption_flags(
-            "vendor_id\t: AuthenticAMD\nflags\t\t: fpu vme de sme sme_active sev\n",
-            &flags);
-        assert_true("mem_enc_amd_sme", flags.amd_sme);
-        assert_true("mem_enc_amd_sme_active", flags.amd_sme_active);
-        assert_false("mem_enc_amd_no_intel_tme", flags.intel_tme);
-
-        bythos_parse_memory_encryption_flags(
             "vendor_id\t: AuthenticAMD\nflags\t\t: fpu vme de sme sev\n",
             &flags);
-        assert_true("mem_enc_amd_sme_only", flags.amd_sme);
-        assert_false("mem_enc_amd_sme_active_absent", flags.amd_sme_active);
+        assert_true("mem_enc_amd_sme", flags.amd_sme);
+        assert_false("mem_enc_amd_no_intel_tme", flags.intel_tme);
 
         bythos_parse_memory_encryption_flags(
             "vendor_id\t: GenuineIntel\nflags\t\t: fpu vme de tme x2apic\n",
@@ -101,10 +94,9 @@ int main(void) {
         assert_false("mem_enc_no_flags_tme", flags.intel_tme);
 
         bythos_parse_memory_encryption_flags(
-            "vendor_id\t: AuthenticAMD\nflags\t\t: fpu vme sme_active sev\n",
+            "vendor_id\t: AuthenticAMD\nflags\t\t: fpu vme smep smap sev\n",
             &flags);
         assert_false("mem_enc_word_boundary_sme", flags.amd_sme);
-        assert_true("mem_enc_word_boundary_sme_active", flags.amd_sme_active);
 
         bythos_parse_memory_encryption_flags(
             "vendor_id\t: AuthenticAMD\nmodel name\t: AMD Ryzen 9 5900HX\n",

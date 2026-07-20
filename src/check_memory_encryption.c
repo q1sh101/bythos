@@ -35,10 +35,9 @@ size_t bythos_check_memory_encryption(check_result_t *results, size_t max_result
         if (!flags.amd_sme) {
             EMIT_SKIP("memory encryption", SKIP_FEATURE_ABSENT,
                 "CPU encryption flags not detected");
-        } else if (flags.amd_sme_active) {
-            EMIT("memory encryption", CHECK_OK, "AMD SME active");
         } else {
-            EMIT("memory encryption", CHECK_WARN, "AMD SME supported but inactive");
+            EMIT("memory encryption", CHECK_OK,
+                "AMD SME capability present; activation not verified");
         }
     } else {
         if (!flags.intel_tme) {

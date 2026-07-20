@@ -167,9 +167,8 @@ void bythos_parse_memory_encryption_flags(const char *cpuinfo,
         return;
     }
 
-    flags->amd_sme        = token_present(flags_line, "sme");
-    flags->amd_sme_active = token_present(flags_line, "sme_active");
-    flags->intel_tme      = token_present(flags_line, "tme");
+    flags->amd_sme   = token_present(flags_line, "sme");
+    flags->intel_tme = token_present(flags_line, "tme");
 }
 
 bool bythos_extract_microcode_revision(const char *text, char *buffer, size_t size) {

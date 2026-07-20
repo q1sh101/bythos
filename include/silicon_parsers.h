@@ -21,7 +21,6 @@ typedef enum {
 
 typedef struct {
     bool amd_sme;
-    bool amd_sme_active;
     bool intel_tme;
 } bythos_mem_enc_flags_t;
 
