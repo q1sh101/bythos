@@ -20,6 +20,7 @@
 static const char *const SECURE_BOOT_ENABLED_TEXT = "enabled";
 static const char *const SECURE_BOOT_DISABLED_TEXT = "disabled";
 static const char *const SECURE_BOOT_SETUP_MODE_TEXT = "Setup Mode";
+static const char *const SECURE_BOOT_VALIDATION_DISABLED_TEXT = "validation is disabled";
 static const char *const FWUPD_NO_UPDATES_TEXT = "No updates available";
 static const char *const SBCTL_INSTALLED_LABEL = "Installed:";
 static const char *const SBCTL_SETUP_MODE_LABEL = "Setup Mode:";
@@ -265,6 +266,14 @@ bool bythos_secure_boot_setup_mode(const char *text) {
     }
 
     return strstr(text, SECURE_BOOT_SETUP_MODE_TEXT) != NULL;
+}
+
+bool bythos_secure_boot_validation_disabled(const char *text) {
+    if (text == NULL) {
+        return false;
+    }
+
+    return strstr(text, SECURE_BOOT_VALIDATION_DISABLED_TEXT) != NULL;
 }
 
 bythos_fwupd_updates_status_t bythos_parse_fwupd_updates(const char *text, int exit_status) {

@@ -96,6 +96,18 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     }
 
     if (!has_mokutil) {
+        EMIT_SKIP_TOOL_INSTALL("shim validation", "mokutil");
+    } else if (state == BYTHOS_SECURE_BOOT_DISABLED) {
+        EMIT_SKIP("shim validation", SKIP_FEATURE_ABSENT, "Secure Boot not enabled");
+    } else if (state != BYTHOS_SECURE_BOOT_ENABLED) {
+        EMIT_SKIP_PROBE("shim validation", "mokutil");
+    } else if (bythos_secure_boot_validation_disabled(state_buffer)) {
+        EMIT("shim validation", CHECK_FAIL, "disabled; shim boots unsigned images");
+    } else {
+        EMIT("shim validation", CHECK_OK, "enforced");
+    }
+
+    if (!has_mokutil) {
         EMIT_SKIP_TOOL_INSTALL("platform key owner", "mokutil");
     } else if (!ownership.owner_readable) {
         EMIT_SKIP_EXEC("platform key owner", "mokutil");

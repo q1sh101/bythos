@@ -164,6 +164,17 @@ int main(void) {
     );
     assert_false("secure_boot_setup_mode_null",
         bythos_secure_boot_setup_mode(NULL));
+    assert_true(
+        "secure_boot_validation_disabled_true",
+        bythos_secure_boot_validation_disabled(
+            "SecureBoot enabled\nSecureBoot validation is disabled in shim\n")
+    );
+    assert_true(
+        "secure_boot_validation_disabled_false",
+        !bythos_secure_boot_validation_disabled("SecureBoot enabled\n")
+    );
+    assert_false("secure_boot_validation_disabled_null",
+        bythos_secure_boot_validation_disabled(NULL));
 
     assert_eq_int(
         "fwupd_no_updates",

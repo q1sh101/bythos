@@ -35,6 +35,7 @@ size_t bythos_join_short_list_names(const char *text, char *buffer, size_t size,
                                        size_t max_names, size_t max_name_chars);
 bythos_secure_boot_status_t bythos_parse_secure_boot_state(const char *text);
 bool bythos_secure_boot_setup_mode(const char *text);
+bool bythos_secure_boot_validation_disabled(const char *text);
 bythos_fwupd_updates_status_t bythos_parse_fwupd_updates(const char *text, int exit_status);
 bool bythos_parse_sbctl_status(const char *text, bythos_sbctl_status_t *status);
 bool bythos_hsi_find_result(const char *json, const char *appstream_id,
