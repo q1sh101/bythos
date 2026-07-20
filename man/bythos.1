@@ -184,8 +184,8 @@ Read-only paths grouped by purpose. None are written.
 .I /dev/cpu/0/msr
 (root)
 .TP
-.I /sys/bus/pci/devices/0000:00:1f.0/config
-(root)
+.I /sys/bus/pci/devices/0000:00:1f.5/config
+(root; falls back to 00:1f.0 on older PCH)
 .TP
 .I /sys/module/ccp
 (AMD PSP visibility)
@@ -295,8 +295,8 @@ already access. A small subset needs root for full coverage:
 .IP \(bu 2
 Intel DCI MSR (\fI/dev/cpu/0/msr\fR) for the debug-interface register.
 .IP \(bu 2
-Intel BIOS write protection (PCI config space at 00:1f.0) for the
-BIOS_CNTL register.
+Intel BIOS write protection (PCI config space at 00:1f.5, or 00:1f.0
+on older PCH) for the BIOS_CNTL register.
 .IP \(bu 2
 SMBIOS Type 24 firmware password slots via \fBdmidecode\fR(8).
 .IP \(bu 2

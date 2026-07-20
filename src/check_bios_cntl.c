@@ -8,8 +8,20 @@
 #include "runtime.h"
 #include "silicon_parsers.h"
 
-#define INTEL_PCH_CONFIG "/sys/bus/pci/devices/0000:00:1f.0/config"
+#define INTEL_SPI_CONFIG "/sys/bus/pci/devices/0000:00:1f.5/config"
+#define INTEL_LPC_CONFIG "/sys/bus/pci/devices/0000:00:1f.0/config"
 #define BIOS_CNTL_OFFSET ((off_t)0xDC)
+
+/* Skylake+ PCH moved BIOS_CNTL to the SPI controller (1f.5); older PCH keeps it on LPC (1f.0). */
+static const char *bios_cntl_config_path(void) {
+    if (bythos_file_exists(INTEL_SPI_CONFIG)) {
+        return INTEL_SPI_CONFIG;
+    }
+    if (bythos_file_exists(INTEL_LPC_CONFIG)) {
+        return INTEL_LPC_CONFIG;
+    }
+    return NULL;
+}
 
 size_t bythos_check_bios_cntl(check_result_t *results, size_t max_results) {
     size_t used = 0;
@@ -21,12 +33,13 @@ size_t bythos_check_bios_cntl(check_result_t *results, size_t max_results) {
         return used;
     }
 
-    if (!bythos_file_exists(INTEL_PCH_CONFIG)) {
+    const char *config_path = bios_cntl_config_path();
+    if (config_path == NULL) {
         EMIT_SKIP_HW("Intel BIOS write protection", "Intel PCH");
         return used;
     }
 
-    int fd = open(INTEL_PCH_CONFIG, O_RDONLY);
+    int fd = open(config_path, O_RDONLY);
     if (fd < 0) {
         EMIT_SKIP_EXEC_ROOT("Intel BIOS write protection", "PCI config");
         return used;
