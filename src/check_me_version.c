@@ -35,14 +35,14 @@ size_t bythos_check_me_version(check_result_t *results, size_t max_results) {
         buf[--len] = '\0';
     }
 
-    unsigned int a = 0, b = 0, c = 0, d = 0;
-    if (sscanf(buf, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+    char version[64] = {0};
+    if (!bythos_parse_me_version(buf, version, sizeof(version))) {
         EMIT_SKIP_PARSE("Intel ME version", "ME version");
         return used;
     }
 
     char detail[BYTHOS_DETAIL_MAX];
-    snprintf(detail, sizeof(detail), "%u.%u.%u.%u; compare against Intel SA advisories", a, b, c, d);
+    snprintf(detail, sizeof(detail), "%s; compare against Intel SA advisories", version);
     results[used++] = make_result("Intel ME version", CHECK_OK, detail);
 
     return used;

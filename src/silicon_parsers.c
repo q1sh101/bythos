@@ -210,3 +210,25 @@ bool bythos_extract_microcode_revision(const char *text, char *buffer, size_t si
 
     return false;
 }
+
+bool bythos_parse_me_version(const char *text, char *out, size_t size) {
+    if (text == NULL || out == NULL || size == 0) {
+        return false;
+    }
+
+    unsigned int platform, major, minor, hotfix, build;
+
+    /* mei sysfs fw_version is <platform>:<major>.<minor>.<hotfix>.<build> */
+    if (sscanf(text, "%u:%u.%u.%u.%u", &platform, &major, &minor, &hotfix, &build) == 5) {
+        snprintf(out, size, "%u.%u.%u.%u", major, minor, hotfix, build);
+        return true;
+    }
+
+    /* tolerate a bare version without the platform prefix */
+    if (sscanf(text, "%u.%u.%u.%u", &major, &minor, &hotfix, &build) == 4) {
+        snprintf(out, size, "%u.%u.%u.%u", major, minor, hotfix, build);
+        return true;
+    }
+
+    return false;
+}

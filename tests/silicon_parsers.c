@@ -117,6 +117,19 @@ int main(void) {
         bythos_parse_memory_encryption_flags("flags : sme\n", NULL);
     }
 
+    {
+        char me_ver[64] = {0};
+        assert_true("me_version_colon_form",
+            bythos_parse_me_version("0:21.2.21.2081", me_ver, sizeof(me_ver)));
+        assert_true("me_version_strips_platform", strcmp(me_ver, "21.2.21.2081") == 0);
+        assert_true("me_version_dot_form",
+            bythos_parse_me_version("21.2.21.2081", me_ver, sizeof(me_ver)));
+        assert_false("me_version_garbage",
+            bythos_parse_me_version("not-a-version", me_ver, sizeof(me_ver)));
+        assert_false("me_version_null",
+            bythos_parse_me_version(NULL, me_ver, sizeof(me_ver)));
+    }
+
     printf("silicon parsers ok\n");
     return 0;
 }

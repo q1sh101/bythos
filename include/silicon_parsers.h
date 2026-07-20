@@ -27,6 +27,7 @@ typedef struct {
 
 void bythos_parse_iommu_cmdline(const char *text, bythos_iommu_cmdline_t *cmdline);
 bool bythos_extract_microcode_revision(const char *text, char *buffer, size_t size);
+bool bythos_parse_me_version(const char *text, char *out, size_t size);
 bythos_cpu_vendor_t bythos_cpu_vendor(void);
 /* returns: 1 = all zeros, 0 = non-zero, -1 = not found */
 int bythos_pcr_zero_check(const char *buf, unsigned int pcr_num);
