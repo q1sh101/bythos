@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -286,10 +287,19 @@ static size_t check_update_capsule(check_result_t *results, size_t max_results) 
 
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/UpdateCapsule", bythos_esp_efi_base());
+    errno = 0;
     DIR *dir = opendir(path);
     if (dir == NULL) {
-        results[used++] = make_result("ESP UpdateCapsule", CHECK_OK,
-            "no pending firmware capsules");
+        if (errno == ENOENT) {
+            results[used++] = make_result("ESP UpdateCapsule", CHECK_OK,
+                "no pending firmware capsules");
+        } else if (errno == EACCES) {
+            results[used++] = make_skip_root("ESP UpdateCapsule", SKIP_EXEC_FAILED,
+                "UpdateCapsule directory unreadable");
+        } else {
+            results[used++] = make_skip("ESP UpdateCapsule", SKIP_EXEC_FAILED,
+                "UpdateCapsule directory unreadable");
+        }
         return used;
     }
 
