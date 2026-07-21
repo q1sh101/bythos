@@ -146,13 +146,15 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
     }
 
     static const char *const hsi_argv[] = {"fwupdmgr", "security", "--json", NULL};
-    char hsi_json[32768] = {0};
+    char hsi_json[65536] = {0};
     int hsi_status = -1;
+    bool hsi_truncated = false;
     bool hsi_ok = false;
 
     if (has_fwupdmgr &&
-        bythos_capture_argv_status(hsi_argv, hsi_json, sizeof(hsi_json), &hsi_status) &&
+        bythos_capture_argv_status_ex(hsi_argv, hsi_json, sizeof(hsi_json), &hsi_status, &hsi_truncated) &&
         hsi_status == 0 &&
+        !hsi_truncated &&
         hsi_json[0] != '\0') {
         hsi_ok = true;
     }
@@ -160,7 +162,9 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
     bythos_cpu_vendor_t vendor = bythos_cpu_vendor();
 
     if (!hsi_ok) {
-        if (has_fwupdmgr) {
+        if (hsi_truncated) {
+            EMIT_SKIP("HSI query", SKIP_OUTPUT_UNPARSEABLE, "fwupdmgr output truncated");
+        } else if (has_fwupdmgr) {
             EMIT_SKIP_EXEC("HSI query", "fwupdmgr");
         } else {
             EMIT_SKIP_TOOL_INSTALL("HSI query", "fwupd");
@@ -203,9 +207,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
     EMIT_HSI("HSI: UEFI db",
              "org.fwupd.hsi.Uefi.Db",                 "valid",
              "valid");
-    EMIT_HSI("HSI: DBX currency",
-             "org.fwupd.hsi.UefiDbxUpdates",          "valid",
-             "revocation list current");
+    /* no HSI attribute for dbx currency in fwupd; covered by the "dbx size" check */
     EMIT_HSI("HSI: UEFI boot variables",
              "org.fwupd.hsi.Uefi.BootserviceVars",    "locked",
              "locked");
@@ -252,11 +254,17 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
 
     /* Intel-only */
     if (vendor == BYTHOS_CPU_VENDOR_INTEL) {
-        EMIT_HSI("HSI: BIOS write protection",
-                 "org.fwupd.hsi.BiosWriteProtection",     "enabled",
-                 "enabled");
+        EMIT_HSI("HSI: SPI BIOSWE",
+                 "org.fwupd.hsi.Spi.Bioswe",              "valid",
+                 "BIOS write-enable clear");
+        EMIT_HSI("HSI: SPI BLE",
+                 "org.fwupd.hsi.Spi.Ble",                 "valid",
+                 "BIOS lock enabled");
+        EMIT_HSI("HSI: SPI SMM_BWP",
+                 "org.fwupd.hsi.Spi.SmmBwp",              "valid",
+                 "SMM write protection enabled");
         EMIT_HSI("HSI: ME manufacturing mode",
-                 "org.fwupd.hsi.IntelMeMfgMode",          "locked",
+                 "org.fwupd.hsi.Mei.ManufacturingMode",   "locked",
                  "not in manufacturing mode");
         EMIT_HSI("HSI: Boot Guard ACM",
                  "org.fwupd.hsi.IntelBootguard.Acm",      "valid",
@@ -288,22 +296,6 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
             }
         }
 
-        {
-            char intel_en[64] = {0};
-            char intel_lk[64] = {0};
-            bool has_en = bythos_hsi_find_result(hsi_json,
-                              "org.fwupd.hsi.SpiWriteProtection.Enabled", intel_en, sizeof(intel_en));
-            bool has_lk = bythos_hsi_find_result(hsi_json,
-                              "org.fwupd.hsi.SpiWriteProtection.Locked",  intel_lk, sizeof(intel_lk));
-
-            if (!has_en && !has_lk) {
-                EMIT_SKIP("HSI: SPI write protection", SKIP_FEATURE_ABSENT, "not reported");
-            } else if (strcmp(intel_en, "enabled") == 0 && strcmp(intel_lk, "enabled") == 0) {
-                EMIT("HSI: SPI write protection", CHECK_OK, "enabled and locked");
-            } else {
-                EMIT("HSI: SPI write protection", CHECK_WARN, "not fully active");
-            }
-        }
     }
 
 #undef EMIT_HSI
