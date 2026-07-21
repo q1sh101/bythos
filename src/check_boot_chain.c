@@ -8,6 +8,7 @@
 
 #include "checks.h"
 #include "checks_internal.h"
+#include "efi_boot_parsers.h"
 #include "firmware_parsers.h"
 #include "runtime.h"
 
@@ -110,7 +111,73 @@ static bool find_efi_binary(const char *const *candidates, size_t candidate_coun
     return found;
 }
 
+#define EFI_GLOBAL_VAR_GUID "8be4df61-93ca-11d2-aa0d-00e098032b8c"
+
+/* resolve the shim the firmware actually boots via BootCurrent, not a readdir guess */
+static bool find_booted_shim(char *path_out, size_t path_out_size) {
+    unsigned char cur[8];
+    size_t cur_len = 0;
+    if (!bythos_read_file_binary(
+            "/sys/firmware/efi/efivars/BootCurrent-" EFI_GLOBAL_VAR_GUID,
+            cur, sizeof(cur), &cur_len) || cur_len < 6) {
+        return false;
+    }
+    unsigned int num = (unsigned int)cur[4] | ((unsigned int)cur[5] << 8);
+
+    char var_path[PATH_MAX];
+    if (snprintf(var_path, sizeof(var_path),
+                 "/sys/firmware/efi/efivars/Boot%04X-" EFI_GLOBAL_VAR_GUID, num)
+            >= (int)sizeof(var_path)) {
+        return false;
+    }
+
+    unsigned char buf[4096];
+    size_t buf_len = 0;
+    if (!bythos_read_file_binary(var_path, buf, sizeof(buf), &buf_len)) {
+        return false;
+    }
+
+    bythos_efi_boot_entry_t entry;
+    if (!bythos_parse_efi_boot_entry(buf, buf_len, (uint16_t)num, &entry) ||
+        entry.filepath[0] == '\0') {
+        return false;
+    }
+
+    char norm[256];
+    size_t k = 0;
+    for (; entry.filepath[k] != '\0' && k + 1 < sizeof(norm); k++) {
+        norm[k] = (entry.filepath[k] == '\\') ? '/' : entry.filepath[k];
+    }
+    norm[k] = '\0';
+
+    char norm_lower[256];
+    bythos_to_lower_ascii(norm, norm_lower, sizeof(norm_lower));
+
+    if (strstr(norm_lower, "shimx64.efi") == NULL &&
+        strstr(norm_lower, "shimaa64.efi") == NULL) {
+        return false;
+    }
+
+    const char *efi = strstr(norm_lower, "/efi/");
+    if (efi == NULL) {
+        return false;
+    }
+    size_t rel_off = (size_t)(efi - norm_lower) + 5;
+    if (rel_off >= k) {
+        return false;
+    }
+
+    if (snprintf(path_out, path_out_size, "%s/%s",
+                 bythos_esp_efi_base(), norm + rel_off) >= (int)path_out_size) {
+        return false;
+    }
+    return bythos_file_exists(path_out);
+}
+
 static bool find_shim(char *path_out, size_t path_out_size) {
+    if (find_booted_shim(path_out, path_out_size)) {
+        return true;
+    }
     static const char *const candidates[] = {"shimx64.efi", "shimaa64.efi"};
     return find_efi_binary(candidates,
                            sizeof(candidates) / sizeof(candidates[0]),
@@ -160,7 +227,7 @@ static size_t check_shim_signature(check_result_t *results, size_t max_results) 
             "binary not signed");
     } else {
         results[used++] = make_result("shim signature", CHECK_OK,
-            "signature present");
+            "signed; chain not validated");
     }
     return used;
 }
@@ -330,9 +397,15 @@ static size_t check_bootloader_sbat(check_result_t *results, size_t max_results)
     static const char *const rev_argv[] = {"mokutil", "--list-sbat-revocations", NULL};
     char rev_buf[BOOTLOADER_SBAT_REV_BUF_BYTES] = {0};
     int rev_exit = -1;
-    if (!bythos_capture_argv_status(rev_argv, rev_buf, sizeof(rev_buf), &rev_exit) ||
+    bool rev_truncated = false;
+    if (!bythos_capture_argv_status_ex(rev_argv, rev_buf, sizeof(rev_buf), &rev_exit, &rev_truncated) ||
         rev_exit != 0) {
         EMIT_SKIP_EXEC("bootloader SBAT", "mokutil");
+        return used;
+    }
+    if (rev_truncated) {
+        EMIT_SKIP("bootloader SBAT", SKIP_OUTPUT_UNPARSEABLE,
+            "revocation list truncated; verdict unreliable");
         return used;
     }
 
@@ -388,7 +461,7 @@ static size_t check_sbat_revocations(check_result_t *results, size_t max_results
     if (used >= max_results) return used;
 
     static const char *const sbat_argv[] = {"mokutil", "--list-sbat-revocations", NULL};
-    char buf[2048] = {0};
+    char buf[4096] = {0};
     int exit_status = -1;
 
     if (!bythos_command_exists("mokutil")) {

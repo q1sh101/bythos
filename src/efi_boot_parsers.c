@@ -127,6 +127,39 @@ static bythos_efi_boot_type_t classify_device_path(const unsigned char *dp,
     return BYTHOS_EFI_BOOT_TYPE_UNKNOWN;
 }
 
+static void dp_extract_filepath(const unsigned char *dp, size_t dp_len,
+                                char *out, size_t out_size) {
+    if (out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    size_t used = 0;
+    size_t offset = 0;
+    while (offset + 4 <= dp_len) {
+        unsigned char type = dp[offset];
+        unsigned char subtype = dp[offset + 1];
+        uint16_t node_len = read_le16(dp + offset + 2);
+
+        if (node_len < 4 || offset + node_len > dp_len) {
+            break;
+        }
+        if (type == EFI_DP_END_TYPE && subtype == EFI_DP_END_SUBTYPE) {
+            break;
+        }
+        if (type == EFI_DP_MEDIA_TYPE && subtype == EFI_DP_MEDIA_FILEPATH) {
+            char seg[256];
+            utf16le_to_ascii(dp + offset + 4, (size_t)(node_len - 4), seg, sizeof(seg));
+            for (size_t i = 0; seg[i] != '\0' && used + 1 < out_size; i++) {
+                out[used++] = seg[i];
+            }
+            out[used] = '\0';
+        }
+
+        offset += node_len;
+    }
+}
+
 static bythos_efi_boot_type_t classify_description(const char *desc) {
     char lower[128];
     bythos_to_lower_ascii(desc, lower, sizeof(lower));
@@ -223,6 +256,8 @@ bool bythos_parse_efi_boot_entry(const unsigned char *data, size_t len,
                 dp_avail = fp_list_len;
             }
             entry->type = classify_device_path(p + dp_offset, dp_avail);
+            dp_extract_filepath(p + dp_offset, dp_avail,
+                                entry->filepath, sizeof(entry->filepath));
         }
     }
 

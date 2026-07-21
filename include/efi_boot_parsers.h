@@ -20,6 +20,7 @@ typedef struct {
     bool active;
     bythos_efi_boot_type_t type;
     char description[128];
+    char filepath[256];
 } bythos_efi_boot_entry_t;
 
 typedef struct {

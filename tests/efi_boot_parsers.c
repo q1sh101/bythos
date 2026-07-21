@@ -101,6 +101,55 @@ static size_t build_dp_entry(unsigned char *buf, size_t buf_size,
     return off;
 }
 
+/* Boot#### fixture with a Media FilePath node carrying a UTF-16 path. */
+static size_t build_filepath_entry(unsigned char *buf, size_t buf_size,
+                                   const char *desc_ascii, const char *path_ascii) {
+    size_t off = 0;
+    size_t path_units = strlen(path_ascii) + 1;
+    uint16_t node_len = (uint16_t)(4 + path_units * 2);
+    uint16_t fp_list_len = (uint16_t)(node_len + 4);
+
+    if (12 + strlen(desc_ascii) * 2 + node_len + 4 > buf_size) {
+        return 0;
+    }
+
+    buf[off++] = 0x07; buf[off++] = 0x00; buf[off++] = 0x00; buf[off++] = 0x00;
+    buf[off++] = 0x01; buf[off++] = 0x00; buf[off++] = 0x00; buf[off++] = 0x00;
+    buf[off++] = (unsigned char)(fp_list_len & 0xFF);
+    buf[off++] = (unsigned char)((fp_list_len >> 8) & 0xFF);
+
+    for (size_t i = 0; desc_ascii[i] != '\0'; i++) {
+        buf[off++] = (unsigned char)desc_ascii[i];
+        buf[off++] = 0x00;
+    }
+    buf[off++] = 0x00; buf[off++] = 0x00;
+
+    buf[off++] = 0x04; buf[off++] = 0x04;
+    buf[off++] = (unsigned char)(node_len & 0xFF);
+    buf[off++] = (unsigned char)((node_len >> 8) & 0xFF);
+    for (size_t i = 0; i < path_units; i++) {
+        buf[off++] = (unsigned char)path_ascii[i];
+        buf[off++] = 0x00;
+    }
+
+    buf[off++] = 0x7F; buf[off++] = 0xFF; buf[off++] = 0x04; buf[off++] = 0x00;
+    return off;
+}
+
+static size_t append_filepath_node(unsigned char *buf, size_t off,
+                                   const char *seg, int with_null) {
+    size_t units = strlen(seg) + (with_null ? 1 : 0);
+    uint16_t node_len = (uint16_t)(4 + units * 2);
+    buf[off++] = 0x04; buf[off++] = 0x04;
+    buf[off++] = (unsigned char)(node_len & 0xFF);
+    buf[off++] = (unsigned char)((node_len >> 8) & 0xFF);
+    for (size_t i = 0; seg[i] != '\0'; i++) {
+        buf[off++] = (unsigned char)seg[i]; buf[off++] = 0x00;
+    }
+    if (with_null) { buf[off++] = 0x00; buf[off++] = 0x00; }
+    return off;
+}
+
 int main(void) {
     bythos_efi_boot_order_t order = {0};
     bythos_efi_boot_entry_t entry = {0};
@@ -141,7 +190,7 @@ int main(void) {
     }
 
     /* partition-based entry, how grub-install registers itself */
-    len = build_dp_entry(buf, sizeof(buf), 0x01, "ubuntu", 0x04, 0x01);
+    len = build_dp_entry(buf, sizeof(buf), 0x01, "arch", 0x04, 0x01);
     assert_true("dp_hd_parse", bythos_parse_efi_boot_entry(buf, len, 0x0002, &entry));
     assert_type("dp_hd_type", entry.type, BYTHOS_EFI_BOOT_TYPE_DISK);
     assert_true("dp_hd_active", entry.active);
@@ -166,6 +215,31 @@ int main(void) {
     len = build_dp_entry(buf, sizeof(buf), 0x01, "Windows Boot Manager", 0x04, 0x04);
     assert_true("dp_filepath_parse", bythos_parse_efi_boot_entry(buf, len, 0x0016, &entry));
     assert_type("dp_filepath_type", entry.type, BYTHOS_EFI_BOOT_TYPE_DISK);
+
+    /* FilePath extraction: the booted binary path is recovered from the device path */
+    len = build_filepath_entry(buf, sizeof(buf), "Arch", "\\EFI\\arch\\shimx64.efi");
+    assert_true("filepath_parse", bythos_parse_efi_boot_entry(buf, len, 0x0002, &entry));
+    assert_true("filepath_value",
+        strcmp(entry.filepath, "\\EFI\\arch\\shimx64.efi") == 0);
+
+    {
+        unsigned char b2[512];
+        size_t o = 0;
+        b2[o++] = 0x07; b2[o++] = 0x00; b2[o++] = 0x00; b2[o++] = 0x00;
+        b2[o++] = 0x01; b2[o++] = 0x00; b2[o++] = 0x00; b2[o++] = 0x00;
+        size_t n1 = 4 + strlen("\\EFI\\arch\\") * 2;
+        size_t n2 = 4 + (strlen("shimx64.efi") + 1) * 2;
+        uint16_t fpl = (uint16_t)(n1 + n2 + 4);
+        b2[o++] = (unsigned char)(fpl & 0xFF); b2[o++] = (unsigned char)((fpl >> 8) & 0xFF);
+        b2[o++] = 'X'; b2[o++] = 0x00; b2[o++] = 0x00; b2[o++] = 0x00;
+        o = append_filepath_node(b2, o, "\\EFI\\arch\\", 0);
+        o = append_filepath_node(b2, o, "shimx64.efi", 1);
+        b2[o++] = 0x7F; b2[o++] = 0xFF; b2[o++] = 0x04; b2[o++] = 0x00;
+        assert_true("filepath_multinode_parse",
+            bythos_parse_efi_boot_entry(b2, o, 0x0003, &entry));
+        assert_true("filepath_multinode_value",
+            strcmp(entry.filepath, "\\EFI\\arch\\shimx64.efi") == 0);
+    }
 
     /* UEFI PXE over IPv4 - separate code path from BBS network */
     len = build_dp_entry(buf, sizeof(buf), 0x01, "PXE Boot", 0x03, 0x0C);
