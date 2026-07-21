@@ -33,7 +33,7 @@ bythos does not harden. It reads, classifies, prints, exits.
 | LUKS              | encrypted volumes, LUKS2 version, dm-integrity, TPM2 binding tiers  |
 | Platform firmware | BIOS_CNTL, Intel ME, Intel DCI, AMD PSP, chipsec availability       |
 | Platform DMA      | IOMMU groups, IOMMU DMA posture, Thunderbolt DMA protection         |
-| CPU               | microcode, memory encryption, CPU vulnerability scan                |
+| CPU               | microcode, kernel vulnerability status, memory encryption, scan     |
 | fwupd             | service state, LVFS, inventory, updates, history, HSI signals       |
 +-------------------+---------------------------------------------------------------------+
 

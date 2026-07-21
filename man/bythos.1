@@ -65,8 +65,9 @@ deep audit availability
 pre-boot DMA protection
 .IP \(bu 2
 .B cpu
-\- CPU microcode revision, CPU vulnerability scanner availability,
-AMD SME / Intel TME memory encryption flags
+\- CPU microcode revision, kernel vulnerability mitigation status
+(sysfs), CPU vulnerability scanner availability, AMD SME / Intel TME
+memory encryption flags
 .IP \(bu 2
 .B fwupd
 \- fwupd service and refresh timer state, LVFS remote enablement,
@@ -226,9 +227,10 @@ mount, validated by \fI/boot/EFI\fR
 .RS 2
 .PP
 Each LUKS-formatted block device discovered via \fBlsblk\fR(8) is
-queried at \fI/dev/<name>\fR with \fBcryptsetup\fR(8) \fBluksDump\fR
+queried at its \fBlsblk\fR \fIPATH\fR with \fBcryptsetup\fR(8) \fBluksDump\fR
 for header version, dm-integrity configuration, and systemd-tpm2
-token PCR mask.
+token PCR mask (raw hash-policy and signed public-key policy); clevis
+tokens are reported but their pin is not inspected.
 .RE
 .SH DEPENDENCIES
 None of the tools below are required. Each is consulted only when
@@ -265,7 +267,8 @@ and TPM2 PCR mask read
 \- LUKS volume discovery
 .IP \(bu 2
 .BR pesign (1)
-\- shim binary signature presence
+\- signature presence on the shim the firmware actually boots
+(resolved via \fBBootCurrent\fR, falling back to a filesystem scan)
 .IP \(bu 2
 .BR sha256sum (1)
 \- fallback boot loader vs shim identity check
