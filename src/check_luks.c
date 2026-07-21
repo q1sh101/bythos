@@ -80,7 +80,7 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
 
     {
         static const char *const lsblk_fstype_argv[] = {
-            "lsblk", "-r", "-n", "-o", "NAME,FSTYPE", NULL
+            "lsblk", "-P", "-o", "PATH,FSTYPE", NULL
         };
         char lsblk_buf[4096] = {0};
         int lsblk_status = -1;
@@ -118,71 +118,85 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
             size_t integrity_count = 0;
             uint32_t weakest_mask = 0xFFFFFFFFu;
             unsigned int weakest_popcount = 32u;
+            uint32_t signed_weakest_mask = 0xFFFFFFFFu;
+            unsigned int signed_weakest_popcount = 32u;
+            size_t signed_policy_count = 0;
+            size_t clevis_count = 0;
             bool any_token = false;
             char *line = lsblk_buf;
 
             while (*line != '\0') {
                 char *eol = strchr(line, '\n');
                 size_t line_len = eol != NULL ? (size_t)(eol - line) : strlen(line);
-                char *space = memchr(line, ' ', line_len);
 
-                if (space != NULL) {
-                    size_t namelen = (size_t)(space - line);
-                    const char *fstype = space + 1;
-                    size_t fstypelen = (size_t)(line + line_len - fstype);
+                /* lsblk -P line: PATH="/dev/..." FSTYPE="crypto_LUKS" */
+                char row[512];
+                size_t copy = line_len < sizeof(row) ? line_len : sizeof(row) - 1;
+                memcpy(row, line, copy);
+                row[copy] = '\0';
 
-                    while (fstypelen > 0 &&
-                           (fstype[fstypelen - 1] == ' ' || fstype[fstypelen - 1] == '\r')) {
-                        fstypelen--;
+                char device_path[128] = {0};
+                const char *ps = strstr(row, "PATH=\"");
+                if (strstr(row, "FSTYPE=\"crypto_LUKS\"") != NULL && ps != NULL) {
+                    ps += strlen("PATH=\"");
+                    const char *pe = strchr(ps, '"');
+                    if (pe != NULL && pe > ps && (size_t)(pe - ps) < sizeof(device_path)) {
+                        snprintf(device_path, sizeof(device_path), "%.*s", (int)(pe - ps), ps);
                     }
+                }
 
-                    if (fstypelen == 11 && strncmp(fstype, "crypto_LUKS", 11) == 0 &&
-                        namelen > 0 && namelen < 64) {
-                        char device_path[80] = {0};
-                        if (snprintf(device_path, sizeof(device_path),
-                                     "/dev/%.*s", (int)namelen, line) < (int)sizeof(device_path)) {
-                            const char *dump_argv[] = {
-                                "cryptsetup", "luksDump", device_path, NULL
-                            };
-                            char dump_buf[8192] = {0};
-                            int dump_status = -1;
-                            luks_found++;
-                            if (bythos_capture_argv_status(
-                                    (const char *const *)dump_argv,
-                                    dump_buf, sizeof(dump_buf), &dump_status) &&
-                                dump_status == 0) {
-                                dump_ok++;
+                if (device_path[0] != '\0') {
+                    const char *dump_argv[] = {
+                        "cryptsetup", "luksDump", device_path, NULL
+                    };
+                    char dump_buf[16384] = {0};
+                    int dump_status = -1;
+                    luks_found++;
+                    if (bythos_capture_argv_status(
+                            (const char *const *)dump_argv,
+                            dump_buf, sizeof(dump_buf), &dump_status) &&
+                        dump_status == 0) {
+                        dump_ok++;
 
-                                int version = bythos_parse_luks_version(dump_buf);
-                                if (version == 2) luks2_count++;
-                                else if (version == 1) luks1_count++;
-                                else version_unknown_count++;
+                        int version = bythos_parse_luks_version(dump_buf);
+                        if (version == 2) luks2_count++;
+                        else if (version == 1) luks1_count++;
+                        else version_unknown_count++;
 
-                                if (bythos_parse_luks_integrity(dump_buf)) {
-                                    integrity_count++;
+                        if (bythos_parse_luks_integrity(dump_buf)) {
+                            integrity_count++;
+                        }
+
+                        if (strstr(dump_buf, "systemd-tpm2") != NULL) {
+                            any_token = true;
+                            uint32_t mask = 0;
+                            if (bythos_parse_luks_pcr_mask(dump_buf, &mask)) {
+                                uint32_t tmp = mask;
+                                unsigned int pc = 0;
+                                while (tmp) { pc += tmp & 1u; tmp >>= 1; }
+                                if (pc < weakest_popcount) {
+                                    weakest_popcount = pc;
+                                    weakest_mask = mask;
                                 }
-
-                                if (strstr(dump_buf, "systemd-tpm2") != NULL) {
-                                    any_token = true;
-                                    uint32_t mask = 0;
-                                    if (bythos_parse_luks_pcr_mask(dump_buf, &mask)) {
-                                        uint32_t tmp = mask;
-                                        unsigned int pc = 0;
-                                        while (tmp) { pc += tmp & 1u; tmp >>= 1; }
-                                        if (pc < weakest_popcount) {
-                                            weakest_popcount = pc;
-                                            weakest_mask = mask;
-                                        }
-                                    } else {
-                                        luks_token_noparsed++;
-                                    }
-                                } else {
-                                    luks_no_token++;
+                            } else if (bythos_luks_signed_policy_pcr_mask(dump_buf, &mask)) {
+                                signed_policy_count++;
+                                uint32_t tmp = mask;
+                                unsigned int pc = 0;
+                                while (tmp) { pc += tmp & 1u; tmp >>= 1; }
+                                if (pc < signed_weakest_popcount) {
+                                    signed_weakest_popcount = pc;
+                                    signed_weakest_mask = mask;
                                 }
                             } else {
-                                dump_failed++;
+                                luks_token_noparsed++;
                             }
+                        } else if (strstr(dump_buf, "clevis") != NULL) {
+                            clevis_count++;
+                        } else {
+                            luks_no_token++;
                         }
+                    } else {
+                        dump_failed++;
                     }
                 }
 
@@ -257,16 +271,19 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
                     EMIT_SKIP_HW("LUKS Secure Boot binding", "TPM");
                     EMIT_SKIP_HW("LUKS boot chain binding", "TPM");
                 } else {
-                    if (!any_token) {
+                    if (!any_token && clevis_count == 0) {
                         EMIT("LUKS TPM binding", CHECK_WARN, "no LUKS device has TPM2 token");
+                    } else if (!any_token) {
+                        EMIT_SKIP("LUKS TPM binding", SKIP_PROBE_INDETERMINATE,
+                            "clevis token present; pin not inspectable via luksDump");
                     } else if (dump_failed > 0) {
                         snprintf(detail, sizeof(detail),
                             "TPM2 token found, but %zu of %zu %s unreadable",
                             dump_failed, luks_found,
                             bythos_pl(luks_found, "device", "devices"));
                         EMIT("LUKS TPM binding", CHECK_WARN, detail);
-                    } else if (luks_no_token > 0) {
-                        EMIT("LUKS TPM binding", CHECK_WARN, "at least one LUKS device without TPM2 token");
+                    } else if (luks_no_token > 0 || clevis_count > 0) {
+                        EMIT("LUKS TPM binding", CHECK_WARN, "at least one LUKS device without a systemd-tpm2 token");
                     } else {
                         snprintf(detail, sizeof(detail),
                             "TPM2 token on %zu %s",
@@ -274,9 +291,12 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
                         EMIT("LUKS TPM binding", CHECK_OK, detail);
                     }
 
-                    if (!any_token) {
+                    if (!any_token && clevis_count == 0) {
                         EMIT_SKIP("LUKS Secure Boot binding", SKIP_SUBJECT_ABSENT, "no TPM2 token to evaluate");
                         EMIT_SKIP("LUKS boot chain binding", SKIP_SUBJECT_ABSENT, "no TPM2 token to evaluate");
+                    } else if (!any_token) {
+                        EMIT_SKIP("LUKS Secure Boot binding", SKIP_PROBE_INDETERMINATE, "clevis binding; PCR policy not inspectable");
+                        EMIT_SKIP("LUKS boot chain binding", SKIP_PROBE_INDETERMINATE, "clevis binding; PCR policy not inspectable");
                     } else if (dump_failed > 0) {
                         snprintf(detail, sizeof(detail),
                             "%zu of %zu %s unreadable by cryptsetup",
@@ -285,8 +305,24 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
                         EMIT_SKIP("LUKS Secure Boot binding", SKIP_EXEC_FAILED, detail);
                         EMIT_SKIP("LUKS boot chain binding", SKIP_EXEC_FAILED, detail);
                     } else if (weakest_mask == 0xFFFFFFFFu || weakest_mask == 0) {
-                        EMIT_SKIP("LUKS Secure Boot binding", SKIP_OUTPUT_UNPARSEABLE, "PCR mask unreadable");
-                        EMIT_SKIP("LUKS boot chain binding", SKIP_OUTPUT_UNPARSEABLE, "PCR mask unreadable");
+                        if (signed_policy_count > 0) {
+                            char pcr_str[64] = {0};
+                            pcr_mask_to_str(signed_weakest_mask, pcr_str, sizeof(pcr_str));
+                            snprintf(detail, sizeof(detail),
+                                "signed policy (pubkey); PCRs: %s", pcr_str);
+                            EMIT("LUKS Secure Boot binding", CHECK_OK, detail);
+                            if ((signed_weakest_mask & PCR_BIT(11)) != 0) {
+                                EMIT("LUKS boot chain binding", CHECK_OK,
+                                    "signed policy; PCR 11 (UKI) measured");
+                            } else {
+                                snprintf(detail, sizeof(detail),
+                                    "signed policy; PCRs: %s, PCR 11 (UKI) absent", pcr_str);
+                                EMIT("LUKS boot chain binding", CHECK_WARN, detail);
+                            }
+                        } else {
+                            EMIT_SKIP("LUKS Secure Boot binding", SKIP_OUTPUT_UNPARSEABLE, "PCR mask unreadable");
+                            EMIT_SKIP("LUKS boot chain binding", SKIP_OUTPUT_UNPARSEABLE, "PCR mask unreadable");
+                        }
                     } else {
                         bool has7 = (weakest_mask & PCR_BIT(7)) != 0;
                         bool has4 = (weakest_mask & PCR_BIT(4)) != 0;
@@ -314,6 +350,10 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
                         if (!has4 && !has9) {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s only; bootloader and initramfs unprotected", pcr_str);
+                            EMIT("LUKS boot chain binding", CHECK_WARN, detail);
+                        } else if (!has4) {
+                            snprintf(detail, sizeof(detail),
+                                "PCRs: %s; bootloader (PCR 4) unmeasured", pcr_str);
                             EMIT("LUKS boot chain binding", CHECK_WARN, detail);
                         } else if (!has9) {
                             snprintf(detail, sizeof(detail),

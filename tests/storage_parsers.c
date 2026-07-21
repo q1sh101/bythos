@@ -93,6 +93,34 @@ int main(void) {
     assert_false("pcr_null", bythos_parse_luks_pcr_mask(NULL, &mask));
     assert_false("pcr_null_out", bythos_parse_luks_pcr_mask("systemd-tpm2\n", NULL));
 
+    {
+        const char *raw =
+            "Tokens:\n  0: systemd-tpm2\n"
+            "\ttpm2-hash-pcrs:   7\n\ttpm2-pubkey:\n\t            (null)\n"
+            "\ttpm2-pubkey-pcrs: \n";
+        assert_true("pcr_hash_field", bythos_parse_luks_pcr_mask(raw, &mask));
+        assert_eq_int("pcr_hash_field_value", (int)mask, (int)(1u << 7));
+        assert_false("pcr_no_signed_policy",
+            bythos_luks_signed_policy_pcr_mask(raw, &mask));
+
+        const char *signed_pol =
+            "  0: systemd-tpm2\n"
+            "\ttpm2-hash-pcrs:   \n\ttpm2-pubkey:\n\t            MIIBpub\n"
+            "\ttpm2-pubkey-pcrs: 11\n";
+        assert_false("pcr_hash_empty_signed",
+            bythos_parse_luks_pcr_mask(signed_pol, &mask));
+        assert_true("signed_policy_present",
+            bythos_luks_signed_policy_pcr_mask(signed_pol, &mask));
+        assert_eq_int("signed_policy_value", (int)mask, (int)(1u << 11));
+
+        const char *both =
+            "  0: systemd-tpm2\n\ttpm2-hash-pcrs: 7\n\ttpm2-pubkey-pcrs: 11\n";
+        bythos_parse_luks_pcr_mask(both, &mask);
+        assert_eq_int("both_raw_is_7", (int)mask, (int)(1u << 7));
+        bythos_luks_signed_policy_pcr_mask(both, &mask);
+        assert_eq_int("both_signed_is_11", (int)mask, (int)(1u << 11));
+    }
+
     assert_eq_int("version_luks2",
         bythos_parse_luks_version("LUKS header information\nVersion:        2\n"), 2);
     assert_eq_int("version_luks1",

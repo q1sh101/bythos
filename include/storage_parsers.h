@@ -13,12 +13,11 @@ typedef struct {
 
 void bythos_parse_lsblk_posture(const char *text, bythos_lsblk_posture_t *posture);
 
-/*
- * Parses PCR indices from a cryptsetup luksDump systemd-tpm2 token section.
- * Handles both "pcrs: 0 7 9" and "tpm2-pcrs: [0, 7, 9]" formats.
- * Returns false if no systemd-tpm2 token or no pcrs field found.
- */
+/* raw hash-policy PCRs ("tpm2-hash-pcrs"); ignores the signed-policy pubkey line */
 bool bythos_parse_luks_pcr_mask(const char *text, uint32_t *mask_out);
+
+/* signed-policy PCRs ("tpm2-pubkey-pcrs"); true only when a pubkey binding exists */
+bool bythos_luks_signed_policy_pcr_mask(const char *text, uint32_t *mask_out);
 
 /*
  * Returns 1 or 2 for LUKS1/LUKS2, or 0 if version cannot be determined.
