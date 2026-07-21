@@ -37,16 +37,14 @@ static void check_sigdb_variable(const char *path, const char *name,
         return;
     }
 
-    /* db/dbx presence matters; sample only enough to classify empty vs non-empty. */
-    unsigned char buf[32];
+    unsigned char buf[65536];
     size_t len = 0;
     if (!bythos_read_file_binary(path, buf, sizeof(buf), &len)) {
         results[(*used)++] = make_result(name, CHECK_WARN, "variable unreadable");
         return;
     }
 
-    bythos_efi_sigdb_status_t status = bythos_classify_efi_sigdb(buf, len);
-    if (status == BYTHOS_EFI_SIGDB_NONEMPTY) {
+    if (bythos_count_efi_sigdb_lists(buf, len) > 0) {
         results[(*used)++] = make_result(name, CHECK_OK, "visible and non-empty");
     } else {
         results[(*used)++] = make_result(name, CHECK_WARN, "visible but empty");
@@ -126,13 +124,13 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
         if (ownership.enrollment_count == 0) {
             EMIT("MOK enrollments", CHECK_OK, "none enrolled");
         } else if (ownership.enrolled_names_parsed) {
-            snprintf(detail, sizeof(detail), "%zu enrolled: %.220s",
+            snprintf(detail, sizeof(detail), "%zu enrolled; review keys: %.200s",
                 ownership.enrollment_count, ownership.enrolled_names);
-            EMIT("MOK enrollments", CHECK_OK, detail);
+            EMIT("MOK enrollments", CHECK_WARN, detail);
         } else {
-            snprintf(detail, sizeof(detail), "%zu enrolled",
+            snprintf(detail, sizeof(detail), "%zu enrolled; review keys",
                 ownership.enrollment_count);
-            EMIT("MOK enrollments", CHECK_OK, detail);
+            EMIT("MOK enrollments", CHECK_WARN, detail);
         }
     }
 
@@ -149,9 +147,10 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     } else {
         unsigned char dbx_buf[65536];
         size_t dbx_len = 0;
-        if (!bythos_read_file_binary(EFI_DBX_PATH, dbx_buf, sizeof(dbx_buf), &dbx_len) ||
-            dbx_len <= 4u) {
+        if (!bythos_read_file_binary(EFI_DBX_PATH, dbx_buf, sizeof(dbx_buf), &dbx_len)) {
             EMIT_SKIP_EXEC("Secure Boot dbx size", "EFI dbx");
+        } else if (dbx_len <= 4u) {
+            EMIT("Secure Boot dbx size", CHECK_WARN, "dbx empty; no revocations");
         } else {
             size_t payload = dbx_len - 4u;
             char detail[BYTHOS_DETAIL_MAX];
@@ -242,7 +241,7 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     }
 
     {
-        char mounts_buf[16384] = {0};
+        char mounts_buf[65536] = {0};
         char opts[256] = {0};
         if (!bythos_read_file_text("/proc/mounts", mounts_buf, sizeof(mounts_buf))) {
             EMIT_SKIP_EXEC("efivarfs mount mode", "proc/mounts");
