@@ -11,6 +11,9 @@ int main(void) {
     assert_true("vendor_ubuntu",      bythos_esp_is_known_vendor("ubuntu"));
     assert_true("vendor_arch",        bythos_esp_is_known_vendor("Arch"));
     assert_true("vendor_nixos",       bythos_esp_is_known_vendor("nixos"));
+    assert_true("vendor_redhat",      bythos_esp_is_known_vendor("redhat"));
+    assert_true("vendor_dell",        bythos_esp_is_known_vendor("Dell"));
+    assert_false("vendor_rhel_old",   bythos_esp_is_known_vendor("rhel"));
     assert_false("vendor_unknown",    bythos_esp_is_known_vendor("attacker"));
     assert_false("vendor_empty",      bythos_esp_is_known_vendor(""));
     assert_false("vendor_null",       bythos_esp_is_known_vendor(NULL));

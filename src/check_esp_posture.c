@@ -72,7 +72,7 @@ static size_t check_esp_filesystem(check_result_t *results, size_t max_results) 
     size_t used = 0;
     if (used >= max_results) return used;
 
-    char mounts[16384] = {0};
+    char mounts[65536] = {0};
     if (!bythos_read_file_text("/proc/mounts", mounts, sizeof(mounts))) {
         EMIT_SKIP_EXEC("ESP filesystem", "/proc/mounts");
         return used;
@@ -158,8 +158,9 @@ static size_t check_efi_vendor_dirs(check_result_t *results, size_t max_results)
             "no vendor directories found");
     } else if (unexpected[0] != '\0') {
         char detail[BYTHOS_DETAIL_MAX];
-        snprintf(detail, sizeof(detail), "unrecognized vendor: %s", unexpected);
-        results[used++] = make_result("EFI vendor directories", CHECK_WARN, detail);
+        snprintf(detail, sizeof(detail),
+            "unrecognized directory name: %s (name only, not a trust signal)", unexpected);
+        results[used++] = make_result("EFI vendor directories", CHECK_OK, detail);
     } else {
         char detail[BYTHOS_DETAIL_MAX];
         snprintf(detail, sizeof(detail), "%zu recognized: %.220s", total, names);

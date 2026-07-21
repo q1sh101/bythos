@@ -18,9 +18,10 @@ bool bythos_esp_is_known_vendor(const char *name) {
     static const char *const known[] = {
         "boot", "microsoft",
         "ubuntu", "debian", "fedora", "arch", "manjaro", "gentoo",
-        "systemd", "opensuse", "suse", "void", "centos", "rhel",
+        "systemd", "opensuse", "suse", "void", "centos", "redhat",
         "rocky", "alma", "almalinux", "linuxmint", "pop", "elementary",
         "nixos", "steamos", "garuda", "endeavouros", "artix", "cachyos",
+        "dell", "hp", "lenovo", "refind", "tools", "grub", "kali", "qubes", "alpine",
         NULL
     };
     for (size_t i = 0; known[i] != NULL; i++) {

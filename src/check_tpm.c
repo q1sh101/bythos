@@ -182,7 +182,7 @@ size_t bythos_check_tpm(check_result_t *results, size_t max_results) {
                 char line[512];
                 bool found = false;
                 while (fgets(line, sizeof(line), f) != NULL) {
-                    if (strstr(line, "EV_S_CRTM_VERSION") != NULL) {
+                    if (strstr(line, "S-CRTM Version") != NULL) {
                         found = true;
                         break;
                     }
@@ -191,7 +191,7 @@ size_t bythos_check_tpm(check_result_t *results, size_t max_results) {
                 if (found) {
                     EMIT("TPM event log ASCII", CHECK_OK, "CRTM version event present");
                 } else {
-                    EMIT("TPM event log ASCII", CHECK_WARN, "EV_S_CRTM_VERSION absent");
+                    EMIT("TPM event log ASCII", CHECK_WARN, "S-CRTM Version event absent");
                 }
             }
         }
