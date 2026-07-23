@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,6 +12,13 @@ static void assert_type(const char *name, bythos_efi_boot_type_t got,
                 name, (int)got, (int)expected);
         exit(1);
     }
+}
+
+static void put_le32(unsigned char *p, uint32_t v) {
+    p[0] = (unsigned char)(v & 0xFF);
+    p[1] = (unsigned char)((v >> 8) & 0xFF);
+    p[2] = (unsigned char)((v >> 16) & 0xFF);
+    p[3] = (unsigned char)((v >> 24) & 0xFF);
 }
 
 /* Minimal Boot#### fixture with a legacy BBS device path. */
@@ -359,25 +367,37 @@ int main(void) {
     }
 
     {
-        unsigned char data[] = {
-            0x07, 0x00, 0x00, 0x00,
-            0x30, 0x06,
-            0x00, 0x00, 0x00, 0x00,
-        };
-        assert_true("sigdb_nonempty",
-            bythos_classify_efi_sigdb(data, sizeof(data)) == BYTHOS_EFI_SIGDB_NONEMPTY);
+        unsigned char data[80] = {0x07, 0x00, 0x00, 0x00};
+        size_t off = 4;
+        for (size_t i = 0; i < 16; i++) data[off + i] = (unsigned char)i;
+        put_le32(data + off + 16, 76);
+        put_le32(data + off + 20, 0);
+        put_le32(data + off + 24, 48);
+        assert_eq_sz("sigdb_valid_one_list", bythos_count_efi_sigdb_lists(data, sizeof(data)), 1);
+    }
+
+    {
+        unsigned char data[81] = {0x07, 0x00, 0x00, 0x00};
+        size_t off = 4;
+        for (size_t i = 0; i < 16; i++) data[off + i] = (unsigned char)i;
+        put_le32(data + off + 16, 76);
+        put_le32(data + off + 20, 0);
+        put_le32(data + off + 24, 48);
+        assert_eq_sz("sigdb_trailing_junk", bythos_count_efi_sigdb_lists(data, sizeof(data)), 0);
+    }
+
+    {
+        unsigned char data[32] = {0x07, 0x00, 0x00, 0x00};
+        size_t off = 4;
+        put_le32(data + off + 16, 28);
+        put_le32(data + off + 20, 0);
+        put_le32(data + off + 24, 48);
+        assert_eq_sz("sigdb_zero_entry_list", bythos_count_efi_sigdb_lists(data, sizeof(data)), 0);
     }
 
     {
         unsigned char data[] = {0x07, 0x00, 0x00, 0x00};
-        assert_true("sigdb_empty",
-            bythos_classify_efi_sigdb(data, sizeof(data)) == BYTHOS_EFI_SIGDB_EMPTY);
-    }
-
-    {
-        unsigned char data[] = {0x07, 0x00, 0x00};
-        assert_true("sigdb_short",
-            bythos_classify_efi_sigdb(data, sizeof(data)) == BYTHOS_EFI_SIGDB_INVALID);
+        assert_eq_sz("sigdb_empty", bythos_count_efi_sigdb_lists(data, sizeof(data)), 0);
     }
 
     printf("efi boot parser: all tests passed\n");

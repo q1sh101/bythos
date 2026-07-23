@@ -279,20 +279,6 @@ bool bythos_parse_efi_boot_next(const unsigned char *data, size_t len,
     return true;
 }
 
-bythos_efi_sigdb_status_t bythos_classify_efi_sigdb(
-    const unsigned char *data, size_t len) {
-    /* db/dbx are EFI attributes followed by the signature-list payload. */
-    if (data == NULL || len < EFI_VAR_ATTR_SIZE) {
-        return BYTHOS_EFI_SIGDB_INVALID;
-    }
-
-    if (len == EFI_VAR_ATTR_SIZE) {
-        return BYTHOS_EFI_SIGDB_EMPTY;
-    }
-
-    return BYTHOS_EFI_SIGDB_NONEMPTY;
-}
-
 size_t bythos_count_efi_sigdb_lists(const unsigned char *data, size_t len) {
     if (data == NULL || len <= EFI_VAR_ATTR_SIZE) {
         return 0;
@@ -302,12 +288,29 @@ size_t bythos_count_efi_sigdb_lists(const unsigned char *data, size_t len) {
     size_t remaining = len - EFI_VAR_ATTR_SIZE;
     size_t count = 0;
 
-    /* Each EFI_SIGNATURE_LIST is at least 28 bytes; advance by SignatureListSize. */
-    while (remaining >= 28) {
-        uint32_t list_size = read_le32(p + 16);
-        if (list_size < 28 || list_size > remaining) {
-            break;
+    while (remaining > 0) {
+        if (remaining < 28) {
+            return 0;
         }
+
+        size_t list_size = read_le32(p + 16);
+        size_t header_size = read_le32(p + 20);
+        size_t signature_size = read_le32(p + 24);
+        if (list_size < 28 || list_size > remaining) {
+            return 0;
+        }
+
+        size_t body_size = list_size - 28;
+        if (header_size > body_size) {
+            return 0;
+        }
+
+        size_t payload_size = body_size - header_size;
+        if (signature_size <= 16 || payload_size < signature_size ||
+            payload_size % signature_size != 0) {
+            return 0;
+        }
+
         count++;
         p += list_size;
         remaining -= list_size;

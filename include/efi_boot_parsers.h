@@ -38,16 +38,7 @@ bool bythos_parse_efi_boot_entry(const unsigned char *data, size_t len,
 bool bythos_parse_efi_boot_next(const unsigned char *data, size_t len,
                                     uint16_t *number);
 
-/* Secure Boot signature database (db/dbx) payload classification */
-typedef enum {
-    BYTHOS_EFI_SIGDB_NONEMPTY = 0,
-    BYTHOS_EFI_SIGDB_EMPTY,
-    BYTHOS_EFI_SIGDB_INVALID,
-} bythos_efi_sigdb_status_t;
-
-bythos_efi_sigdb_status_t bythos_classify_efi_sigdb(
-    const unsigned char *data, size_t len);
-
+/* Secure Boot signature database (db/dbx): count of well-formed EFI_SIGNATURE_LISTs */
 size_t bythos_count_efi_sigdb_lists(const unsigned char *data, size_t len);
 
 #endif

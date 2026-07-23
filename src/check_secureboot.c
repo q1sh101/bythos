@@ -46,6 +46,8 @@ static void check_sigdb_variable(const char *path, const char *name,
 
     if (bythos_count_efi_sigdb_lists(buf, len) > 0) {
         results[(*used)++] = make_result(name, CHECK_OK, "visible and non-empty");
+    } else if (len > 4u) {
+        results[(*used)++] = make_result(name, CHECK_WARN, "visible but unparseable");
     } else {
         results[(*used)++] = make_result(name, CHECK_WARN, "visible but empty");
     }
@@ -176,7 +178,11 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
         } else {
             size_t lists = bythos_count_efi_sigdb_lists(db_buf, db_len);
             if (lists == 0) {
-                EMIT("Secure Boot db keys", CHECK_WARN, "empty; Secure Boot allowlist missing");
+                if (db_len > 4u) {
+                    EMIT("Secure Boot db keys", CHECK_WARN, "allowlist visible but unparseable");
+                } else {
+                    EMIT("Secure Boot db keys", CHECK_WARN, "empty; Secure Boot allowlist missing");
+                }
             } else {
                 char detail[BYTHOS_DETAIL_MAX];
                 snprintf(detail, sizeof(detail),

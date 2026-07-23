@@ -113,14 +113,20 @@ static bool find_efi_binary(const char *const *candidates, size_t candidate_coun
 
 #define EFI_GLOBAL_VAR_GUID "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
-/* resolve the shim the firmware actually boots via BootCurrent, not a readdir guess */
-static bool find_booted_shim(char *path_out, size_t path_out_size) {
+typedef enum {
+    SHIM_RESOLUTION_FOUND = 0,
+    SHIM_RESOLUTION_FALLBACK_ALLOWED,
+    SHIM_RESOLUTION_BOOTED_NON_SHIM,
+    SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED,
+} shim_resolution_t;
+
+static shim_resolution_t find_booted_shim(char *path_out, size_t path_out_size) {
     unsigned char cur[8];
     size_t cur_len = 0;
     if (!bythos_read_file_binary(
             "/sys/firmware/efi/efivars/BootCurrent-" EFI_GLOBAL_VAR_GUID,
             cur, sizeof(cur), &cur_len) || cur_len < 6) {
-        return false;
+        return SHIM_RESOLUTION_FALLBACK_ALLOWED;
     }
     unsigned int num = (unsigned int)cur[4] | ((unsigned int)cur[5] << 8);
 
@@ -128,19 +134,19 @@ static bool find_booted_shim(char *path_out, size_t path_out_size) {
     if (snprintf(var_path, sizeof(var_path),
                  "/sys/firmware/efi/efivars/Boot%04X-" EFI_GLOBAL_VAR_GUID, num)
             >= (int)sizeof(var_path)) {
-        return false;
+        return SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
     }
 
     unsigned char buf[4096];
     size_t buf_len = 0;
     if (!bythos_read_file_binary(var_path, buf, sizeof(buf), &buf_len)) {
-        return false;
+        return SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
     }
 
     bythos_efi_boot_entry_t entry;
     if (!bythos_parse_efi_boot_entry(buf, buf_len, (uint16_t)num, &entry) ||
         entry.filepath[0] == '\0') {
-        return false;
+        return SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
     }
 
     char norm[256];
@@ -155,33 +161,50 @@ static bool find_booted_shim(char *path_out, size_t path_out_size) {
 
     if (strstr(norm_lower, "shimx64.efi") == NULL &&
         strstr(norm_lower, "shimaa64.efi") == NULL) {
-        return false;
+        return SHIM_RESOLUTION_BOOTED_NON_SHIM;
     }
 
     const char *efi = strstr(norm_lower, "/efi/");
     if (efi == NULL) {
-        return false;
+        return SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
     }
     size_t rel_off = (size_t)(efi - norm_lower) + 5;
     if (rel_off >= k) {
-        return false;
+        return SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
     }
 
     if (snprintf(path_out, path_out_size, "%s/%s",
                  bythos_esp_efi_base(), norm + rel_off) >= (int)path_out_size) {
-        return false;
+        return SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
     }
-    return bythos_file_exists(path_out);
+    return bythos_file_exists(path_out) ? SHIM_RESOLUTION_FOUND :
+        SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
 }
 
-static bool find_shim(char *path_out, size_t path_out_size) {
-    if (find_booted_shim(path_out, path_out_size)) {
+static bool find_shim(char *path_out, size_t path_out_size,
+                      shim_resolution_t *resolution_out) {
+    shim_resolution_t resolution = find_booted_shim(path_out, path_out_size);
+    if (resolution == SHIM_RESOLUTION_FOUND) {
+        if (resolution_out != NULL) {
+            *resolution_out = resolution;
+        }
         return true;
     }
+    if (resolution != SHIM_RESOLUTION_FALLBACK_ALLOWED) {
+        if (resolution_out != NULL) {
+            *resolution_out = resolution;
+        }
+        return false;
+    }
     static const char *const candidates[] = {"shimx64.efi", "shimaa64.efi"};
-    return find_efi_binary(candidates,
-                           sizeof(candidates) / sizeof(candidates[0]),
-                           path_out, path_out_size);
+    bool found = find_efi_binary(candidates,
+                                 sizeof(candidates) / sizeof(candidates[0]),
+                                 path_out, path_out_size);
+    if (resolution_out != NULL) {
+        *resolution_out = found ? SHIM_RESOLUTION_FOUND :
+            SHIM_RESOLUTION_FALLBACK_ALLOWED;
+    }
+    return found;
 }
 
 static bool find_grub(char *path_out, size_t path_out_size) {
@@ -198,8 +221,15 @@ static size_t check_shim_signature(check_result_t *results, size_t max_results) 
     }
 
     char shim_path[PATH_MAX] = {0};
-    if (!find_shim(shim_path, sizeof(shim_path))) {
-        EMIT_SKIP_SUBJECT("shim signature", "shim");
+    shim_resolution_t shim_resolution = SHIM_RESOLUTION_FALLBACK_ALLOWED;
+    if (!find_shim(shim_path, sizeof(shim_path), &shim_resolution)) {
+        if (shim_resolution == SHIM_RESOLUTION_BOOTED_NON_SHIM) {
+            EMIT_SKIP("shim signature", SKIP_SUBJECT_ABSENT, "booted via non-shim path");
+        } else if (shim_resolution == SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED) {
+            EMIT_SKIP("shim signature", SKIP_OUTPUT_UNPARSEABLE, "BootCurrent path unresolved");
+        } else {
+            EMIT_SKIP_SUBJECT("shim signature", "shim");
+        }
         return used;
     }
 
@@ -249,7 +279,7 @@ static void scan_initramfs_dir(const char *dir_path, int max_depth,
         }
 
         struct stat st;
-        if (stat(path, &st) != 0) continue;
+        if (lstat(path, &st) != 0) continue;
 
         if (S_ISREG(st.st_mode)) {
             if (strncmp(name, "initrd", 6) != 0 && strncmp(name, "initramfs", 9) != 0) {
@@ -353,7 +383,7 @@ static size_t check_bootloader_sbat(check_result_t *results, size_t max_results)
 
     char shim_path[PATH_MAX] = {0};
     char grub_path[PATH_MAX] = {0};
-    bool have_shim = find_shim(shim_path, sizeof(shim_path));
+    bool have_shim = find_shim(shim_path, sizeof(shim_path), NULL);
     bool have_grub = find_grub(grub_path, sizeof(grub_path));
 
     if (!have_shim && !have_grub) {
