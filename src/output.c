@@ -162,12 +162,33 @@ check_state_t bythos_summary_state(const posture_summary_t *summary) {
     return CHECK_SKIP;
 }
 
-static int utf8_seq_len(unsigned char c) {
-    if (c < 0x80) return 1;
-    if (c < 0xC2) return 0;
-    if (c < 0xE0) return 2;
-    if (c < 0xF0) return 3;
-    if (c < 0xF5) return 4;
+/* length 2..4 of a well-formed UTF-8 sequence at p (Unicode 3.9, Table 3-7), else 0 */
+static int utf8_valid_len(const unsigned char *p) {
+    unsigned char c = p[0];
+    if (c >= 0xC2 && c <= 0xDF) {
+        return (p[1] >= 0x80 && p[1] <= 0xBF) ? 2 : 0;
+    }
+    if (c == 0xE0) {
+        return (p[1] >= 0xA0 && p[1] <= 0xBF && p[2] >= 0x80 && p[2] <= 0xBF) ? 3 : 0;
+    }
+    if ((c >= 0xE1 && c <= 0xEC) || c == 0xEE || c == 0xEF) {
+        return (p[1] >= 0x80 && p[1] <= 0xBF && p[2] >= 0x80 && p[2] <= 0xBF) ? 3 : 0;
+    }
+    if (c == 0xED) {
+        return (p[1] >= 0x80 && p[1] <= 0x9F && p[2] >= 0x80 && p[2] <= 0xBF) ? 3 : 0;
+    }
+    if (c == 0xF0) {
+        return (p[1] >= 0x90 && p[1] <= 0xBF && p[2] >= 0x80 && p[2] <= 0xBF &&
+                p[3] >= 0x80 && p[3] <= 0xBF) ? 4 : 0;
+    }
+    if (c >= 0xF1 && c <= 0xF3) {
+        return (p[1] >= 0x80 && p[1] <= 0xBF && p[2] >= 0x80 && p[2] <= 0xBF &&
+                p[3] >= 0x80 && p[3] <= 0xBF) ? 4 : 0;
+    }
+    if (c == 0xF4) {
+        return (p[1] >= 0x80 && p[1] <= 0x8F && p[2] >= 0x80 && p[2] <= 0xBF &&
+                p[3] >= 0x80 && p[3] <= 0xBF) ? 4 : 0;
+    }
     return 0;
 }
 
@@ -184,17 +205,8 @@ static void print_json_string(const char *text) {
         if (c < 0x20)  { printf("\\u%04x", c);  p++; continue; }
         if (c < 0x80)  { putchar(c);            p++; continue; }
 
-        int seq = utf8_seq_len(c);
-        if (seq < 2) {
-            fputs("\xEF\xBF\xBD", stdout);
-            p++;
-            continue;
-        }
-        bool valid = true;
-        for (int i = 1; i < seq; i++) {
-            if ((p[i] & 0xC0) != 0x80) { valid = false; break; }
-        }
-        if (!valid) {
+        int seq = utf8_valid_len(p);
+        if (seq == 0) {
             fputs("\xEF\xBF\xBD", stdout);
             p++;
             continue;
