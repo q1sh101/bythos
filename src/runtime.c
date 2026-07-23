@@ -126,7 +126,16 @@ bool bythos_command_exists(const char *name) {
             continue;
         }
         if (access(candidate, X_OK) == 0) {
-            found = true;
+#ifdef BYTHOS_ALLOW_PATH_OVERRIDE
+            if (getenv("BYTHOS_PATH") != NULL && *getenv("BYTHOS_PATH") != '\0') {
+                found = true;
+                break;
+            }
+#endif
+            /* trust only a root-owned, non-writable first match — execvp runs it as root */
+            struct stat st;
+            found = stat(candidate, &st) == 0 && st.st_uid == 0 &&
+                    (st.st_mode & (mode_t)0022) == 0;
             break;
         }
     }
@@ -394,6 +403,13 @@ bool bythos_capture_argv_status_ex(const char *const argv[], char *buffer, size_
 
         setenv("PATH", trusted_path(), 1);
         setenv("LC_ALL", "C", 1);
+        static const char *const unsafe_env[] = {
+            "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "LD_ORIGIN_PATH",
+            "GCONV_PATH", "NLSPATH", "IFS", "BASH_ENV", "ENV",
+        };
+        for (size_t i = 0; i < sizeof(unsafe_env) / sizeof(unsafe_env[0]); i++) {
+            unsetenv(unsafe_env[i]);
+        }
         execvp(argv[0], (char *const *)argv);
         _exit(errno == ENOENT ? 127 : 126);
     }
@@ -412,7 +428,7 @@ bool bythos_capture_argv_status_ex(const char *const argv[], char *buffer, size_
     size_t used = 0;
     char chunk[512];
     ssize_t count;
-    while ((count = read(pipefd[0], chunk, sizeof(chunk))) > 0) {
+    while (!bythos_alarm_fired && (count = read(pipefd[0], chunk, sizeof(chunk))) > 0) {
         if (used + 1 < size) {
             size_t to_copy = (size_t)count;
             size_t remaining = size - used - 1;
@@ -446,12 +462,14 @@ bool bythos_capture_argv_status_ex(const char *const argv[], char *buffer, size_
             return true;
         }
         kill(pid, SIGKILL);
-        waitpid(pid, NULL, 0);
+        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) { }
         return false;
     }
 
     int status = 0;
-    if (waitpid(pid, &status, 0) < 0) {
+    pid_t reaped;
+    while ((reaped = waitpid(pid, &status, 0)) < 0 && errno == EINTR) { }
+    if (reaped < 0) {
         return false;
     }
     if (!WIFEXITED(status)) {
