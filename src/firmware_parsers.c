@@ -381,19 +381,6 @@ bool bythos_hsi_find_attribute(const char *json, const char *appstream_id,
     return false;
 }
 
-bool bythos_hsi_find_result(const char *json, const char *appstream_id,
-                                char *result_buf, size_t result_size) {
-    if (result_buf == NULL || result_size == 0) {
-        return false;
-    }
-    bythos_hsi_attribute_t attr;
-    if (!bythos_hsi_find_attribute(json, appstream_id, &attr)) {
-        return false;
-    }
-    snprintf(result_buf, result_size, "%s", attr.result);
-    return true;
-}
-
 bool bythos_parse_sbctl_status(const char *text, bythos_sbctl_status_t *status) {
     if (text == NULL || status == NULL) {
         return false;

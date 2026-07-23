@@ -241,7 +241,7 @@ availability only, since their full audits are out of bythos scope.
 .IP \(bu 2
 .BR mokutil (1)
 \- Secure Boot state, setup mode, platform key owner, MOK enrollment
-list, db / dbx and SBAT revocation enumeration
+list, trust-breadth signals, and SBAT revocation enumeration
 .IP \(bu 2
 .BR sbctl (8)
 \- sbctl key management initialization status
@@ -268,7 +268,8 @@ and TPM2 PCR mask read
 .IP \(bu 2
 .BR pesign (1)
 \- signature presence on the shim the firmware actually boots
-(resolved via \fBBootCurrent\fR, falling back to a filesystem scan)
+(resolved via \fBBootCurrent\fR; filesystem scan only when BootCurrent is
+unavailable)
 .IP \(bu 2
 .BR sha256sum (1)
 \- fallback boot loader vs shim identity check

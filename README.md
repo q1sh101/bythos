@@ -94,8 +94,7 @@ output is captured through a bounded pipe with a 10-second timeout and parsed
 by hand-written C parsers.
 
 PE/COFF parsing extracts `.sbat` from installed shim/grub binaries. JSON
-output escapes control characters and invalid UTF-8. Each subgroup has a fixed
-result capacity; overflow is flagged as truncated in both outputs.
+output escapes control characters and sanitizes invalid UTF-8.
 
 ## Optional Helpers
 
@@ -105,7 +104,7 @@ coverage:
 | Helper       | Adds coverage for                                  |
 |--------------|----------------------------------------------------|
 | `fwupdmgr`   | HSI signals, firmware inventory, update status     |
-| `mokutil`    | Secure Boot state, MOK enrollments, db/dbx, SBAT   |
+| `mokutil`    | Secure Boot state, MOK, trust breadth, SBAT        |
 | `sbctl`      | Secure Boot owner GUID and vendor-key state        |
 | `tpm2-tools` | TPM PCR reads and dictionary-attack lockout policy |
 | `dmidecode`  | SMBIOS firmware password status                    |
