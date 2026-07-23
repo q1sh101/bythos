@@ -30,14 +30,17 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
     {
         char buffer[8192] = {0};
         int status = -1;
+        bool truncated = false;
         bythos_lsblk_posture_t posture = {0};
 
         if (!bythos_command_exists("lsblk")) {
             EMIT_SKIP_TOOL_INSTALL("LUKS block devices", "util-linux");
-        } else if (!bythos_capture_argv_status(lsblk_argv, buffer, sizeof(buffer), &status)) {
+        } else if (!bythos_capture_argv_status_ex(lsblk_argv, buffer, sizeof(buffer), &status, &truncated)) {
             EMIT("LUKS block devices", CHECK_WARN, "unable to inspect block devices");
         } else if (status != 0) {
             EMIT("LUKS block devices", CHECK_WARN, "lsblk inspection failed");
+        } else if (truncated) {
+            EMIT("LUKS block devices", CHECK_WARN, "lsblk output truncated; device list incomplete");
         } else {
             bythos_parse_lsblk_posture(buffer, &posture);
             if (posture.luks_count > 0) {
@@ -84,6 +87,7 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
         };
         char lsblk_buf[4096] = {0};
         int lsblk_status = -1;
+        bool lsblk_truncated = false;
         bool tpm_present = bythos_file_exists("/sys/class/tpm/tpm0");
 
         if (!bythos_command_exists("lsblk")) {
@@ -98,14 +102,20 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
             EMIT_SKIP_TOOL_INSTALL("LUKS TPM binding", "cryptsetup");
             EMIT_SKIP_TOOL_INSTALL("LUKS Secure Boot binding", "cryptsetup");
             EMIT_SKIP_TOOL_INSTALL("LUKS boot chain binding", "cryptsetup");
-        } else if (!bythos_capture_argv_status(lsblk_fstype_argv, lsblk_buf,
-                                                    sizeof(lsblk_buf), &lsblk_status) ||
+        } else if (!bythos_capture_argv_status_ex(lsblk_fstype_argv, lsblk_buf,
+                                                    sizeof(lsblk_buf), &lsblk_status, &lsblk_truncated) ||
                    lsblk_status != 0) {
             EMIT_SKIP_EXEC("LUKS version", "lsblk");
             EMIT_SKIP_EXEC("LUKS dm-integrity", "lsblk");
             EMIT_SKIP_EXEC("LUKS TPM binding", "lsblk");
             EMIT_SKIP_EXEC("LUKS Secure Boot binding", "lsblk");
             EMIT_SKIP_EXEC("LUKS boot chain binding", "lsblk");
+        } else if (lsblk_truncated) {
+            EMIT_SKIP("LUKS version", SKIP_OUTPUT_UNPARSEABLE, "lsblk output truncated");
+            EMIT_SKIP("LUKS dm-integrity", SKIP_OUTPUT_UNPARSEABLE, "lsblk output truncated");
+            EMIT_SKIP("LUKS TPM binding", SKIP_OUTPUT_UNPARSEABLE, "lsblk output truncated");
+            EMIT_SKIP("LUKS Secure Boot binding", SKIP_OUTPUT_UNPARSEABLE, "lsblk output truncated");
+            EMIT_SKIP("LUKS boot chain binding", SKIP_OUTPUT_UNPARSEABLE, "lsblk output truncated");
         } else {
             size_t luks_found = 0;
             size_t luks_no_token = 0;

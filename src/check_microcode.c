@@ -14,10 +14,13 @@ size_t bythos_check_microcode(check_result_t *results, size_t max_results) {
     const char *cpuinfo_path = "/proc/cpuinfo";
 
     {
+        bythos_cpu_vendor_t vendor = bythos_cpu_vendor();
         char microcode_line[256] = {0};
         char revision[128] = {0};
 
-        if (!bythos_first_line_with_prefix(cpuinfo_path, "microcode", microcode_line, sizeof(microcode_line))) {
+        if (vendor != BYTHOS_CPU_VENDOR_INTEL && vendor != BYTHOS_CPU_VENDOR_AMD) {
+            EMIT_SKIP_VENDOR("CPU microcode", "x86-only check");
+        } else if (!bythos_first_line_with_prefix(cpuinfo_path, "microcode", microcode_line, sizeof(microcode_line))) {
             EMIT("CPU microcode", CHECK_WARN, "revision not visible");
         } else if (bythos_extract_microcode_revision(microcode_line, revision, sizeof(revision))) {
             char detail[160];
@@ -35,7 +38,7 @@ size_t bythos_check_microcode(check_result_t *results, size_t max_results) {
             EMIT_SKIP("CPU vulnerabilities", SKIP_FEATURE_ABSENT,
                 "kernel vulnerabilities sysfs not exposed");
         } else {
-            size_t total = 0, vulnerable = 0;
+            size_t total = 0, vulnerable = 0, unknown = 0;
             char first_vuln[64] = {0};
             struct dirent *entry;
             while ((entry = bythos_readdir_safe(d, NULL)) != NULL) {
@@ -53,6 +56,8 @@ size_t bythos_check_microcode(check_result_t *results, size_t max_results) {
                     if (first_vuln[0] == '\0') {
                         snprintf(first_vuln, sizeof(first_vuln), "%.60s", entry->d_name);
                     }
+                } else if (strncmp(lower, "unknown", 7) == 0) {
+                    unknown++;
                 }
             }
             closedir(d);
@@ -64,6 +69,11 @@ size_t bythos_check_microcode(check_result_t *results, size_t max_results) {
                 snprintf(detail, sizeof(detail), "%zu of %zu vulnerable (e.g. %s)",
                     vulnerable, total, first_vuln);
                 EMIT("CPU vulnerabilities", CHECK_WARN, detail);
+            } else if (unknown > 0) {
+                char detail[BYTHOS_DETAIL_MAX];
+                snprintf(detail, sizeof(detail),
+                    "%zu of %zu indeterminate (kernel reports unknown)", unknown, total);
+                EMIT("CPU vulnerabilities", CHECK_WARN, detail);
             } else {
                 char detail[BYTHOS_DETAIL_MAX];
                 snprintf(detail, sizeof(detail), "%zu checks; all mitigated or not affected",
@@ -74,7 +84,8 @@ size_t bythos_check_microcode(check_result_t *results, size_t max_results) {
     }
 
     if (bythos_command_exists("spectre-meltdown-checker")) {
-        EMIT("CPU vulnerability scan", CHECK_OK, "available: spectre-meltdown-checker");
+        EMIT_SKIP("CPU vulnerability scan", SKIP_NOT_CONFIGURED,
+            "spectre-meltdown-checker available; run manually for a deep scan");
     } else {
         EMIT_SKIP_TOOL_INSTALL("CPU vulnerability scan", "spectre-meltdown-checker");
     }

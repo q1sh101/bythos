@@ -11,26 +11,34 @@
 
 static const char *const BOLT_SYSFS_BASE = "/sys/bus/thunderbolt/devices";
 
-static bool read_tb_domain_attr(const char *attr, char *buffer, size_t size) {
-    DIR *dir = opendir(BOLT_SYSFS_BASE);
-    if (dir == NULL) return false;
+typedef enum {
+    TB_DMA_UNREADABLE,
+    TB_DMA_ALL_ON,
+    TB_DMA_SOME_OFF,
+} tb_dma_state_t;
 
+static tb_dma_state_t read_tb_dma_state(void) {
+    DIR *dir = opendir(BOLT_SYSFS_BASE);
+    if (dir == NULL) return TB_DMA_UNREADABLE;
+
+    size_t readable = 0, unprotected = 0;
     struct dirent *entry;
     while ((entry = bythos_readdir_safe(dir, NULL)) != NULL) {
         if (strncmp(entry->d_name, "domain", 6) != 0) continue;
 
         char path[PATH_MAX];
-        if (snprintf(path, sizeof(path), "%s/%s/%s",
-                     BOLT_SYSFS_BASE, entry->d_name, attr) >= (int)sizeof(path)) continue;
+        if (snprintf(path, sizeof(path), "%s/%s/iommu_dma_protection",
+                     BOLT_SYSFS_BASE, entry->d_name) >= (int)sizeof(path)) continue;
 
-        if (bythos_read_file_text(path, buffer, size)) {
-            closedir(dir);
-            return true;
-        }
+        char val[8] = {0};
+        if (!bythos_read_file_text(path, val, sizeof(val))) continue;
+        readable++;
+        if (strcmp(bythos_trim(val), "1") != 0) unprotected++;
     }
 
     closedir(dir);
-    return false;
+    if (readable == 0) return TB_DMA_UNREADABLE;
+    return unprotected > 0 ? TB_DMA_SOME_OFF : TB_DMA_ALL_ON;
 }
 
 static bool tb_controller_present(void) {
@@ -57,16 +65,16 @@ size_t bythos_check_bolt_dma(check_result_t *results, size_t max_results) {
         return used;
     }
 
-    char val[8] = {0};
-    if (!read_tb_domain_attr("iommu_dma_protection", val, sizeof(val))) {
+    switch (read_tb_dma_state()) {
+    case TB_DMA_UNREADABLE:
         EMIT_SKIP_FEATURE("Thunderbolt DMA protection", "iommu_dma_protection");
-    } else {
-        char *v = bythos_trim(val);
-        if (strcmp(v, "1") == 0) {
-            EMIT("Thunderbolt DMA protection", CHECK_OK, "pre-boot DMA active");
-        } else {
-            EMIT("Thunderbolt DMA protection", CHECK_WARN, "pre-boot DMA inactive");
-        }
+        break;
+    case TB_DMA_ALL_ON:
+        EMIT("Thunderbolt DMA protection", CHECK_OK, "pre-boot DMA active");
+        break;
+    case TB_DMA_SOME_OFF:
+        EMIT("Thunderbolt DMA protection", CHECK_WARN, "pre-boot DMA inactive on at least one domain");
+        break;
     }
 
     return used;

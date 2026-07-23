@@ -70,10 +70,12 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
     bool usb_in_order = false;
     bool net_in_order = false;
     bool cd_in_order = false;
+    size_t unreadable = 0;
 
     for (size_t i = 0; i < order.order_count; i++) {
         bythos_efi_boot_entry_t entry = {0};
         if (!read_boot_entry(order.order[i], &entry)) {
+            unreadable++;
             continue;
         }
 
@@ -98,18 +100,24 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
 
     if (usb_in_order) {
         EMIT("EFI USB boot", CHECK_WARN, "active entry in EFI boot order");
+    } else if (unreadable > 0) {
+        EMIT_SKIP("EFI USB boot", SKIP_OUTPUT_UNPARSEABLE, "some boot entries unreadable; USB presence unconfirmed");
     } else {
         EMIT("EFI USB boot", CHECK_OK, "no active entry in EFI boot order");
     }
 
     if (net_in_order) {
         EMIT("EFI network boot", CHECK_WARN, "active entry in EFI boot order");
+    } else if (unreadable > 0) {
+        EMIT_SKIP("EFI network boot", SKIP_OUTPUT_UNPARSEABLE, "some boot entries unreadable; network presence unconfirmed");
     } else {
         EMIT("EFI network boot", CHECK_OK, "no active entry in EFI boot order");
     }
 
     if (cd_in_order) {
         EMIT("EFI CD/DVD boot", CHECK_WARN, "active entry in EFI boot order");
+    } else if (unreadable > 0) {
+        EMIT_SKIP("EFI CD/DVD boot", SKIP_OUTPUT_UNPARSEABLE, "some boot entries unreadable; CD/DVD presence unconfirmed");
     } else {
         EMIT("EFI CD/DVD boot", CHECK_OK, "no active entry in EFI boot order");
     }
