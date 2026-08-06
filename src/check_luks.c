@@ -34,13 +34,13 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
         bythos_lsblk_posture_t posture = {0};
 
         if (!bythos_command_exists("lsblk")) {
-            EMIT_SKIP_TOOL_INSTALL("LUKS block devices", "util-linux");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS block devices", "lsblk", "util-linux");
         } else if (!bythos_capture_argv_status_ex(lsblk_argv, buffer, sizeof(buffer), &status, &truncated)) {
-            EMIT("LUKS block devices", CHECK_WARN, "unable to inspect block devices");
+            EMIT_SKIP_EXEC("LUKS block devices", "lsblk");
         } else if (status != 0) {
-            EMIT("LUKS block devices", CHECK_WARN, "lsblk inspection failed");
+            EMIT_SKIP_EXEC("LUKS block devices", "lsblk");
         } else if (truncated) {
-            EMIT("LUKS block devices", CHECK_WARN, "lsblk output truncated; device list incomplete");
+            EMIT_SKIP("LUKS block devices", SKIP_OUTPUT_UNPARSEABLE, "lsblk output truncated");
         } else {
             bythos_parse_lsblk_posture(buffer, &posture);
             if (posture.luks_count > 0) {
@@ -91,17 +91,17 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
         bool tpm_present = bythos_file_exists("/sys/class/tpm/tpm0");
 
         if (!bythos_command_exists("lsblk")) {
-            EMIT_SKIP_TOOL_INSTALL("LUKS version", "util-linux");
-            EMIT_SKIP_TOOL_INSTALL("LUKS dm-integrity", "util-linux");
-            EMIT_SKIP_TOOL_INSTALL("LUKS TPM binding", "util-linux");
-            EMIT_SKIP_TOOL_INSTALL("LUKS Secure Boot binding", "util-linux");
-            EMIT_SKIP_TOOL_INSTALL("LUKS boot chain binding", "util-linux");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS version", "lsblk", "util-linux");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS dm-integrity", "lsblk", "util-linux");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS TPM binding", "lsblk", "util-linux");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS Secure Boot binding", "lsblk", "util-linux");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS boot chain binding", "lsblk", "util-linux");
         } else if (!bythos_command_exists("cryptsetup")) {
-            EMIT_SKIP_TOOL_INSTALL("LUKS version", "cryptsetup");
-            EMIT_SKIP_TOOL_INSTALL("LUKS dm-integrity", "cryptsetup");
-            EMIT_SKIP_TOOL_INSTALL("LUKS TPM binding", "cryptsetup");
-            EMIT_SKIP_TOOL_INSTALL("LUKS Secure Boot binding", "cryptsetup");
-            EMIT_SKIP_TOOL_INSTALL("LUKS boot chain binding", "cryptsetup");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS version", "cryptsetup", "cryptsetup");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS dm-integrity", "cryptsetup", "cryptsetup");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS TPM binding", "cryptsetup", "cryptsetup");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS Secure Boot binding", "cryptsetup", "cryptsetup");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LUKS boot chain binding", "cryptsetup", "cryptsetup");
         } else if (!bythos_capture_argv_status_ex(lsblk_fstype_argv, lsblk_buf,
                                                     sizeof(lsblk_buf), &lsblk_status, &lsblk_truncated) ||
                    lsblk_status != 0) {

@@ -42,7 +42,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
 
     switch (bythos_probe_systemd_service("fwupd.service")) {
     case BYTHOS_SERVICE_STATE_SYSTEMCTL_UNAVAILABLE:
-        EMIT_SKIP_TOOL_INSTALL("fwupd service", "systemd");
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("fwupd service", "systemctl", "systemd");
         break;
     case BYTHOS_SERVICE_STATE_ACTIVE:
         EMIT("fwupd service", CHECK_OK, "running");
@@ -60,7 +60,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
 
     switch (bythos_probe_systemd_service("fwupd-refresh.timer")) {
     case BYTHOS_SERVICE_STATE_SYSTEMCTL_UNAVAILABLE:
-        EMIT_SKIP_TOOL_INSTALL("auto-refresh timer", "systemd");
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("auto-refresh timer", "systemctl", "systemd");
         break;
     case BYTHOS_SERVICE_STATE_ACTIVE:
         EMIT("auto-refresh timer", CHECK_OK, "active");
@@ -79,7 +79,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
     {
         char enabled[32] = {0};
         if (!has_fwupdmgr) {
-            EMIT_SKIP_TOOL_INSTALL("LVFS remote", "fwupd");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("LVFS remote", "fwupdmgr", "fwupd");
         } else if (lvfs_conf == NULL) {
             EMIT("LVFS remote", CHECK_WARN, "lvfs.conf not found");
         } else if (!bythos_read_key_value(lvfs_conf, "Enabled", enabled, sizeof(enabled))) {
@@ -93,7 +93,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
 
     {
         if (!has_fwupdmgr) {
-            EMIT_SKIP_TOOL_INSTALL("firmware inventory", "fwupd");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("firmware inventory", "fwupdmgr", "fwupd");
         } else if (bythos_run_argv_quiet(fwupd_devices_argv) == 0) {
             EMIT("firmware inventory", CHECK_OK, "device list available");
         } else {
@@ -107,7 +107,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
         bythos_fwupd_updates_status_t updates = BYTHOS_FWUPD_UPDATES_UNKNOWN;
 
         if (!has_fwupdmgr) {
-            EMIT_SKIP_TOOL_INSTALL("firmware update status", "fwupd");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("firmware update status", "fwupdmgr", "fwupd");
         } else if (!bythos_capture_argv_status(fwupd_updates_argv, buffer, sizeof(buffer), &status)) {
             EMIT_SKIP_EXEC("firmware update status", "fwupdmgr");
         } else if ((updates = bythos_parse_fwupd_updates(buffer, status)) == BYTHOS_FWUPD_UPDATES_NONE) {
@@ -126,7 +126,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
         int hist_status = -1;
 
         if (!has_fwupdmgr) {
-            EMIT_SKIP_TOOL_INSTALL("firmware update history", "fwupd");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("firmware update history", "fwupdmgr", "fwupd");
         } else if (!bythos_capture_argv_status(fwupd_history_argv, hist_buffer, sizeof(hist_buffer), &hist_status)) {
             EMIT_SKIP_EXEC("firmware update history", "fwupdmgr");
         } else if (hist_status != 0) {
@@ -161,35 +161,65 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
 
     bythos_cpu_vendor_t vendor = bythos_cpu_vendor();
 
+    skip_reason_t hsi_skip_reason = SKIP_NONE;
+    const char *hsi_skip_detail = NULL;
+    bool hsi_tool_untrusted = false;
+
     if (!hsi_ok) {
         if (hsi_truncated) {
-            EMIT_SKIP("HSI query", SKIP_OUTPUT_UNPARSEABLE, "fwupdmgr output truncated");
+            hsi_skip_reason = SKIP_OUTPUT_UNPARSEABLE;
+            hsi_skip_detail = "fwupdmgr output truncated";
         } else if (has_fwupdmgr) {
-            EMIT_SKIP_EXEC("HSI query", "fwupdmgr");
+            hsi_skip_reason = SKIP_EXEC_FAILED;
+            hsi_skip_detail = "fwupdmgr query failed";
+        } else if (bythos_command_untrusted("fwupdmgr")) {
+            hsi_tool_untrusted = true;
+            hsi_skip_detail =
+                "fwupdmgr on PATH is not root-owned; refusing to run it as root";
         } else {
-            EMIT_SKIP_TOOL_INSTALL("HSI query", "fwupd");
+            hsi_skip_reason = SKIP_TOOL_ABSENT;
+            hsi_skip_detail = "requires fwupd";
         }
-        return used;
     }
+
+#define EMIT_HSI_UNAVAILABLE(name_) \
+    do { \
+        if (used < max_results) { \
+            results[used++] = hsi_tool_untrusted \
+                ? make_result((name_), CHECK_WARN, hsi_skip_detail) \
+                : hsi_skip_reason == SKIP_TOOL_ABSENT \
+                    ? make_skip_actionable((name_), hsi_skip_reason, hsi_skip_detail) \
+                    : make_skip((name_), hsi_skip_reason, hsi_skip_detail); \
+        } \
+    } while (0)
 
 #define EMIT_HSI(name_, id_, positive_, ok_msg_) \
     do { \
         if (used < max_results) { \
             bythos_hsi_attribute_t _a; \
-            if (!bythos_hsi_find_attribute(hsi_json, (id_), &_a)) { \
+            if (hsi_skip_detail != NULL) { \
+                EMIT_HSI_UNAVAILABLE(name_); \
+            } else if (!bythos_hsi_find_attribute(hsi_json, (id_), &_a)) { \
                 results[used++] = make_skip((name_), SKIP_FEATURE_ABSENT, "not reported"); \
-            } else if (strcmp(_a.result, "not-supported") == 0) { \
-                results[used++] = make_skip((name_), SKIP_FEATURE_ABSENT, "not supported"); \
-            } else if ((_a.success[0] != '\0' && strcmp(_a.result, _a.success) == 0) || \
-                       (_a.success[0] == '\0' && strcmp(_a.result, (positive_)) == 0)) { \
-                results[used++] = make_result((name_), CHECK_OK, (ok_msg_)); \
             } else { \
-                char _detail[BYTHOS_DETAIL_MAX]; \
-                hsi_format_warn(&_a, _detail, sizeof(_detail)); \
-                results[used++] = make_result((name_), CHECK_WARN, _detail); \
+                if (!_a.passing) { \
+                    hsi_mapped_not_passing++; \
+                } \
+                if (strcmp(_a.result, "not-supported") == 0) { \
+                    results[used++] = make_skip((name_), SKIP_FEATURE_ABSENT, "not supported"); \
+                } else if ((_a.success[0] != '\0' && strcmp(_a.result, _a.success) == 0) || \
+                           (_a.success[0] == '\0' && strcmp(_a.result, (positive_)) == 0)) { \
+                    results[used++] = make_result((name_), CHECK_OK, (ok_msg_)); \
+                } else { \
+                    char _detail[BYTHOS_DETAIL_MAX]; \
+                    hsi_format_warn(&_a, _detail, sizeof(_detail)); \
+                    results[used++] = make_result((name_), CHECK_WARN, _detail); \
+                } \
             } \
         } \
     } while (0)
+
+    size_t hsi_mapped_not_passing = 0;
 
     /* universal */
     EMIT_HSI("HSI: platform fused",
@@ -273,13 +303,22 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
                  "org.fwupd.hsi.IntelBootguard.Policy",   "valid",
                  "valid");
 
-        {
+        if (hsi_skip_detail != NULL) {
+            EMIT_HSI_UNAVAILABLE("HSI: Boot Guard");
+        } else {
             bythos_hsi_attribute_t en_attr;
             bythos_hsi_attribute_t ver_attr;
             bool has_en  = bythos_hsi_find_attribute(hsi_json,
                                "org.fwupd.hsi.IntelBootguard.Enabled", &en_attr);
             bool has_ver = bythos_hsi_find_attribute(hsi_json,
                                "org.fwupd.hsi.IntelBootguard.Verified", &ver_attr);
+
+            if (has_en && !en_attr.passing) {
+                hsi_mapped_not_passing++;
+            }
+            if (has_ver && !ver_attr.passing) {
+                hsi_mapped_not_passing++;
+            }
 
             if (!has_en) {
                 EMIT_SKIP("HSI: Boot Guard", SKIP_FEATURE_ABSENT, "not reported");
@@ -298,7 +337,27 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
 
     }
 
+    {
+        size_t reported = hsi_skip_detail != NULL
+            ? 0
+            : bythos_hsi_count_not_passing(hsi_json);
+        if (hsi_skip_detail != NULL) {
+            EMIT_HSI_UNAVAILABLE("HSI: unmapped attributes");
+        } else if (reported > hsi_mapped_not_passing) {
+            char detail[BYTHOS_DETAIL_MAX];
+            size_t hidden = reported - hsi_mapped_not_passing;
+            snprintf(detail, sizeof(detail),
+                "%zu further fwupd %s not passing; run: fwupdmgr security",
+                hidden, bythos_pl(hidden, "attribute is", "attributes are"));
+            EMIT("HSI: unmapped attributes", CHECK_WARN, detail);
+        } else {
+            EMIT("HSI: unmapped attributes", CHECK_OK,
+                 "every fwupd attribute not passing is reported above");
+        }
+    }
+
 #undef EMIT_HSI
+#undef EMIT_HSI_UNAVAILABLE
 
     return used;
 }

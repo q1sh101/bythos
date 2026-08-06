@@ -44,8 +44,13 @@ static size_t run_subgroups(const subgroup_def_t *defs,
                 sg->truncated = true;
                 break;
             }
-            sg->result_count += defs[i].fns[j](
-                SUBGROUP_TAIL(sg), SUBGROUP_REMAINING(sg));
+            size_t remaining = SUBGROUP_REMAINING(sg);
+            size_t produced = defs[i].fns[j](SUBGROUP_TAIL(sg), remaining + 1);
+            if (produced > remaining) {
+                sg->truncated = true;
+                produced = remaining;
+            }
+            sg->result_count += produced;
         }
         subgroup_finalize(sg);
     }

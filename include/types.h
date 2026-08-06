@@ -48,7 +48,7 @@ typedef struct {
 
 typedef struct {
     const char *name;
-    check_result_t results[BYTHOS_MAX_SUBGROUP_RESULTS];
+    check_result_t results[BYTHOS_MAX_SUBGROUP_RESULTS + 1];
     size_t result_count;
     bool truncated;
     posture_summary_t summary;

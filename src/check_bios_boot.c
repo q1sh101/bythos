@@ -27,11 +27,27 @@ static bool read_boot_entry(uint16_t number, bythos_efi_boot_entry_t *entry) {
 
     unsigned char buf[4096];
     size_t len = 0;
-    if (!bythos_read_file_binary(path, buf, sizeof(buf), &len)) {
+    bool truncated = false;
+    if (!bythos_read_file_binary_ex(path, buf, sizeof(buf), &len, &truncated) || truncated) {
         return false;
     }
 
     return bythos_parse_efi_boot_entry(buf, len, number, entry);
+}
+
+static bool append_entry_id(char *list, size_t list_size, uint16_t id) {
+    size_t used = strlen(list);
+    const char *separator = used > 0 ? " " : "";
+    char item[16];
+    if (snprintf(item, sizeof(item), "%sBoot%04X", separator, id) >= (int)sizeof(item)) {
+        return false;
+    }
+    size_t item_len = strlen(item);
+    if (used + item_len >= list_size) {
+        return false;
+    }
+    memcpy(list + used, item, item_len + 1);
+    return true;
 }
 
 static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
@@ -70,7 +86,15 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
     bool usb_in_order = false;
     bool net_in_order = false;
     bool cd_in_order = false;
+    char usb_entries[200] = {0};
+    char net_entries[200] = {0};
+    char cd_entries[200] = {0};
+    bool usb_all_listed = true;
+    bool net_all_listed = true;
+    bool cd_all_listed = true;
     size_t unreadable = 0;
+    size_t unclassified = 0;
+    bool order_capped = order.truncated;
 
     for (size_t i = 0; i < order.order_count; i++) {
         bythos_efi_boot_entry_t entry = {0};
@@ -86,12 +110,24 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
         switch (entry.type) {
             case BYTHOS_EFI_BOOT_TYPE_USB:
                 usb_in_order = true;
+                if (!append_entry_id(usb_entries, sizeof(usb_entries), order.order[i])) {
+                    usb_all_listed = false;
+                }
                 break;
             case BYTHOS_EFI_BOOT_TYPE_NETWORK:
                 net_in_order = true;
+                if (!append_entry_id(net_entries, sizeof(net_entries), order.order[i])) {
+                    net_all_listed = false;
+                }
                 break;
             case BYTHOS_EFI_BOOT_TYPE_CD:
                 cd_in_order = true;
+                if (!append_entry_id(cd_entries, sizeof(cd_entries), order.order[i])) {
+                    cd_all_listed = false;
+                }
+                break;
+            case BYTHOS_EFI_BOOT_TYPE_UNKNOWN:
+                unclassified++;
                 break;
             default:
                 break;
@@ -99,25 +135,34 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
     }
 
     if (usb_in_order) {
-        EMIT("EFI USB boot", CHECK_WARN, "active entry in EFI boot order");
-    } else if (unreadable > 0) {
-        EMIT_SKIP("EFI USB boot", SKIP_OUTPUT_UNPARSEABLE, "some boot entries unreadable; USB presence unconfirmed");
+        char detail[BYTHOS_DETAIL_MAX];
+        snprintf(detail, sizeof(detail), "active in EFI boot order: %s%s",
+                 usb_entries, usb_all_listed ? "" : " and more");
+        EMIT("EFI USB boot", CHECK_WARN, detail);
+    } else if (unreadable > 0 || order_capped || unclassified > 0) {
+        EMIT_SKIP("EFI USB boot", SKIP_OUTPUT_UNPARSEABLE, "boot order not fully inspected; USB presence unconfirmed");
     } else {
         EMIT("EFI USB boot", CHECK_OK, "no active entry in EFI boot order");
     }
 
     if (net_in_order) {
-        EMIT("EFI network boot", CHECK_WARN, "active entry in EFI boot order");
-    } else if (unreadable > 0) {
-        EMIT_SKIP("EFI network boot", SKIP_OUTPUT_UNPARSEABLE, "some boot entries unreadable; network presence unconfirmed");
+        char detail[BYTHOS_DETAIL_MAX];
+        snprintf(detail, sizeof(detail), "active in EFI boot order: %s%s",
+                 net_entries, net_all_listed ? "" : " and more");
+        EMIT("EFI network boot", CHECK_WARN, detail);
+    } else if (unreadable > 0 || order_capped || unclassified > 0) {
+        EMIT_SKIP("EFI network boot", SKIP_OUTPUT_UNPARSEABLE, "boot order not fully inspected; network presence unconfirmed");
     } else {
         EMIT("EFI network boot", CHECK_OK, "no active entry in EFI boot order");
     }
 
     if (cd_in_order) {
-        EMIT("EFI CD/DVD boot", CHECK_WARN, "active entry in EFI boot order");
-    } else if (unreadable > 0) {
-        EMIT_SKIP("EFI CD/DVD boot", SKIP_OUTPUT_UNPARSEABLE, "some boot entries unreadable; CD/DVD presence unconfirmed");
+        char detail[BYTHOS_DETAIL_MAX];
+        snprintf(detail, sizeof(detail), "active in EFI boot order: %s%s",
+                 cd_entries, cd_all_listed ? "" : " and more");
+        EMIT("EFI CD/DVD boot", CHECK_WARN, detail);
+    } else if (unreadable > 0 || order_capped || unclassified > 0) {
+        EMIT_SKIP("EFI CD/DVD boot", SKIP_OUTPUT_UNPARSEABLE, "boot order not fully inspected; CD/DVD presence unconfirmed");
     } else {
         EMIT("EFI CD/DVD boot", CHECK_OK, "no active entry in EFI boot order");
     }
@@ -263,7 +308,7 @@ static size_t check_firmware_password(check_result_t *results, size_t max_result
 
     if (!bythos_command_exists("dmidecode")) {
         for (size_t i = 0; i < slot_count && used < max_results; i++) {
-            EMIT_SKIP_TOOL_INSTALL(slots[i].name, "dmidecode");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED(slots[i].name, "dmidecode", "dmidecode");
         }
         return used;
     }
