@@ -50,8 +50,10 @@ typedef struct {
     char result[64];
     char success[64];
     bythos_hsi_action_t action;
+    bool passing;
 } bythos_hsi_attribute_t;
 
+size_t bythos_hsi_count_not_passing(const char *json);
 bool bythos_hsi_find_attribute(const char *json, const char *appstream_id,
                                    bythos_hsi_attribute_t *out);
 

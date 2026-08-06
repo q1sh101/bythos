@@ -269,6 +269,34 @@ int main(void) {
             bythos_hsi_find_attribute(attr_sample, "org.fwupd.hsi.Kernel.Swap", &attr));
         assert_eq_int("hsi_attr_os_action", (int)attr.action, (int)BYTHOS_HSI_ACTION_OS);
 
+        {
+            static const char PASSING_SAMPLE[] =
+                "{\"SecurityAttributes\":[\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Passing\","
+                "   \"HsiResult\":\"locked\",\"Flags\":[\"success\",\"runtime-issue\"]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Failing\","
+                "   \"HsiResult\":\"unlocked\",\"Flags\":[\"runtime-issue\"]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.NoFlags\","
+                "   \"HsiResult\":\"locked\"}\n"
+                "]}\n";
+            bythos_hsi_attribute_t flagged;
+
+            assert_true("hsi_attr_success_flag_found",
+                bythos_hsi_find_attribute(PASSING_SAMPLE, "org.fwupd.hsi.Passing", &flagged));
+            assert_true("hsi_attr_success_flag_is_passing", flagged.passing);
+
+            assert_true("hsi_attr_no_success_flag_found",
+                bythos_hsi_find_attribute(PASSING_SAMPLE, "org.fwupd.hsi.Failing", &flagged));
+            assert_false("hsi_attr_no_success_flag_is_not_passing", flagged.passing);
+
+            assert_true("hsi_attr_without_flags_found",
+                bythos_hsi_find_attribute(PASSING_SAMPLE, "org.fwupd.hsi.NoFlags", &flagged));
+            assert_false("hsi_attr_without_flags_is_not_passing", flagged.passing);
+
+            size_t reported = bythos_hsi_count_not_passing(PASSING_SAMPLE);
+            assert_eq_sz("hsi_passing_flag_agrees_with_the_counter", reported, 2);
+        }
+
         assert_false("hsi_attr_absent",
             bythos_hsi_find_attribute(attr_sample, "org.fwupd.hsi.Missing", &attr));
         assert_false("hsi_attr_null_json",

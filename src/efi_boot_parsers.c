@@ -197,6 +197,7 @@ bool bythos_parse_efi_boot_order(const unsigned char *data, size_t len,
 
     if (count > BYTHOS_EFI_BOOT_MAX_ENTRIES) {
         count = BYTHOS_EFI_BOOT_MAX_ENTRIES;
+        order->truncated = true;
     }
 
     for (size_t i = 0; i < count; i++) {
@@ -276,6 +277,18 @@ bool bythos_parse_efi_boot_next(const unsigned char *data, size_t len,
     }
 
     *number = read_le16(data + EFI_VAR_ATTR_SIZE);
+    return true;
+}
+
+bool bythos_parse_efi_bool_var(const unsigned char *data, size_t len, bool *value) {
+    if (data == NULL || value == NULL || len != EFI_VAR_ATTR_SIZE + 1u) {
+        return false;
+    }
+    unsigned char payload = data[EFI_VAR_ATTR_SIZE];
+    if (payload > 1u) {
+        return false;
+    }
+    *value = payload == 1u;
     return true;
 }
 

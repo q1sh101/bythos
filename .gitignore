@@ -8,4 +8,5 @@ tests/firmware_ownership
 tests/efi_boot_parsers
 tests/esp_posture
 tests/skip_reason
+tests/fuzz_parsers
 *.o

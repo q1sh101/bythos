@@ -30,9 +30,10 @@ RUNTIME_TEST_BIN := tests/runtime_capture
 EFI_BOOT_TEST_BIN := tests/efi_boot_parsers
 ESP_TEST_BIN := tests/esp_posture
 SKIP_REASON_TEST_BIN := tests/skip_reason
-TEST_BINS := $(FIRMWARE_TEST_BIN) $(FIRMWARE_OWNERSHIP_TEST_BIN) $(SILICON_TEST_BIN) $(STORAGE_TEST_BIN) $(RUNTIME_TEST_BIN) $(EFI_BOOT_TEST_BIN) $(ESP_TEST_BIN) $(SKIP_REASON_TEST_BIN)
+FUZZ_TEST_BIN := tests/fuzz_parsers
+TEST_BINS := $(FUZZ_TEST_BIN) $(FIRMWARE_TEST_BIN) $(FIRMWARE_OWNERSHIP_TEST_BIN) $(SILICON_TEST_BIN) $(STORAGE_TEST_BIN) $(RUNTIME_TEST_BIN) $(EFI_BOOT_TEST_BIN) $(ESP_TEST_BIN) $(SKIP_REASON_TEST_BIN)
 
-.PHONY: all clean run help-check smoke ci-test test host-test asan install uninstall firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
+.PHONY: all clean run help-check smoke fuzz-test ci-test test host-test asan install uninstall firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
 
 .DELETE_ON_ERROR:
 
@@ -77,7 +78,10 @@ esp-test: $(ESP_TEST_BIN)
 skip-reason-test: $(SKIP_REASON_TEST_BIN)
 	./$(SKIP_REASON_TEST_BIN)
 
-ci-test: help-check firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
+fuzz-test: $(FUZZ_TEST_BIN)
+	./$(FUZZ_TEST_BIN)
+
+ci-test: help-check fuzz-test firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
 
 test: ci-test
 
@@ -117,6 +121,9 @@ $(EFI_BOOT_TEST_BIN): tests/efi_boot_parsers.c src/efi_boot_parsers.c src/runtim
 
 $(ESP_TEST_BIN): tests/esp_posture.c src/esp_parsers.c include/esp_parsers.h tests/assert_helpers.h
 	$(CC) $(TEST_CFLAGS) tests/esp_posture.c src/esp_parsers.c -o $@ $(LDFLAGS)
+
+$(FUZZ_TEST_BIN): tests/fuzz_parsers.c src/efi_boot_parsers.c src/firmware_parsers.c src/esp_parsers.c src/silicon_parsers.c src/storage_parsers.c src/runtime.c tests/assert_helpers.h
+	$(CC) $(TEST_CFLAGS) tests/fuzz_parsers.c src/efi_boot_parsers.c src/firmware_parsers.c src/esp_parsers.c src/silicon_parsers.c src/storage_parsers.c src/runtime.c -o $@ $(LDFLAGS)
 
 $(SKIP_REASON_TEST_BIN): tests/skip_reason.c src/output.c include/output.h include/types.h tests/assert_helpers.h
 	$(CC) $(TEST_CFLAGS) tests/skip_reason.c src/output.c -o $@ $(LDFLAGS)

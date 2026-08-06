@@ -400,6 +400,121 @@ int main(void) {
         assert_eq_sz("sigdb_empty", bythos_count_efi_sigdb_lists(data, sizeof(data)), 0);
     }
 
+    {
+        bool value = true;
+        unsigned char enabled[5] = {0x06, 0x00, 0x00, 0x00, 0x01};
+        assert_true("efi_bool_enabled",
+            bythos_parse_efi_bool_var(enabled, sizeof(enabled), &value) && value);
+
+        unsigned char disabled[5] = {0x06, 0x00, 0x00, 0x00, 0x00};
+        assert_true("efi_bool_disabled",
+            bythos_parse_efi_bool_var(disabled, sizeof(disabled), &value) && !value);
+
+        unsigned char attr_only[4] = {0x06, 0x00, 0x00, 0x00};
+        assert_true("efi_bool_attr_only_refused",
+            !bythos_parse_efi_bool_var(attr_only, sizeof(attr_only), &value));
+
+        unsigned char too_long[6] = {0x06, 0x00, 0x00, 0x00, 0x01, 0x01};
+        assert_true("efi_bool_oversized_refused",
+            !bythos_parse_efi_bool_var(too_long, sizeof(too_long), &value));
+
+        unsigned char out_of_range[5] = {0x06, 0x00, 0x00, 0x00, 0x02};
+        assert_true("efi_bool_non_boolean_refused",
+            !bythos_parse_efi_bool_var(out_of_range, sizeof(out_of_range), &value));
+
+        assert_true("efi_bool_null_refused",
+            !bythos_parse_efi_bool_var(NULL, 5, &value) &&
+            !bythos_parse_efi_bool_var(enabled, sizeof(enabled), NULL));
+    }
+
+    {
+        unsigned char data[4 + 28 + 48] = {0x07, 0x00, 0x00, 0x00};
+        size_t off = 4;
+        put_le32(data + off + 16, 27);
+        put_le32(data + off + 20, 0);
+        put_le32(data + off + 24, 48);
+        assert_eq_sz("sigdb_list_size_below_header",
+            bythos_count_efi_sigdb_lists(data, sizeof(data)), 0);
+
+        put_le32(data + off + 16, 28 + 48);
+        put_le32(data + off + 20, 49);
+        assert_eq_sz("sigdb_header_larger_than_body",
+            bythos_count_efi_sigdb_lists(data, sizeof(data)), 0);
+
+        put_le32(data + off + 20, 0);
+        put_le32(data + off + 24, 16);
+        assert_eq_sz("sigdb_signature_size_at_guid_floor",
+            bythos_count_efi_sigdb_lists(data, sizeof(data)), 0);
+    }
+
+    {
+        unsigned char data[4 + 60] = {0x07, 0x00, 0x00, 0x00};
+        size_t off = 4;
+        put_le32(data + off + 16, 60);
+        put_le32(data + off + 20, 64);
+        put_le32(data + off + 24, 32);
+        assert_eq_sz("sigdb_header_past_body_is_not_a_key_list",
+            bythos_count_efi_sigdb_lists(data, sizeof(data)), 0);
+    }
+
+    {
+        unsigned char data[4 + 2 * (BYTHOS_EFI_BOOT_MAX_ENTRIES + 8)] = {0x07, 0x00, 0x00, 0x00};
+        bythos_efi_boot_order_t order;
+        assert_true("boot_order_capped_at_max_entries",
+            bythos_parse_efi_boot_order(data, sizeof(data), &order) &&
+            order.order_count == BYTHOS_EFI_BOOT_MAX_ENTRIES);
+        assert_true("boot_order_reports_the_cap", order.truncated);
+
+        unsigned char short_data[4 + 2 * 4] = {0x07, 0x00, 0x00, 0x00};
+        assert_true("short_boot_order_is_not_truncated",
+            bythos_parse_efi_boot_order(short_data, sizeof(short_data), &order) &&
+            order.order_count == 4 && !order.truncated);
+
+        unsigned char exact[4 + 2 * BYTHOS_EFI_BOOT_MAX_ENTRIES] = {0x07, 0x00, 0x00, 0x00};
+        assert_true("exact_boot_order_is_not_truncated",
+            bythos_parse_efi_boot_order(exact, sizeof(exact), &order) &&
+            order.order_count == BYTHOS_EFI_BOOT_MAX_ENTRIES && !order.truncated);
+    }
+
+    {
+        /* A device path node type the classifier does not know must stay
+           UNKNOWN so the caller reports it instead of assuming it is safe. */
+        static const unsigned char DP_NODES[][2] = {
+            {0x03, 0x0A}, {0x03, 0x12}, {0x03, 0x17}, {0x03, 0x1A},
+            {0x03, 0x1B}, {0x03, 0x1C}, {0x04, 0x09}, {0x01, 0x99},
+        };
+        for (size_t i = 0; i < sizeof(DP_NODES) / sizeof(DP_NODES[0]); i++) {
+            unsigned char data[64] = {0x07, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
+            size_t o = 8;
+            size_t fp_at = o;
+            o += 2;
+            const char *desc = "Recovery";
+            for (const char *c = desc; *c != '\0'; c++) {
+                data[o++] = (unsigned char)*c;
+                data[o++] = 0;
+            }
+            data[o++] = 0;
+            data[o++] = 0;
+            size_t dp_start = o;
+            data[o++] = DP_NODES[i][0];
+            data[o++] = DP_NODES[i][1];
+            data[o++] = 10;
+            data[o++] = 0;
+            o += 6;
+            data[o++] = 0x7F;
+            data[o++] = 0xFF;
+            data[o++] = 4;
+            data[o++] = 0;
+            data[fp_at] = (unsigned char)(o - dp_start);
+
+            bythos_efi_boot_entry_t entry;
+            assert_true("unclassified_node_parses",
+                bythos_parse_efi_boot_entry(data, o, 1, &entry));
+            assert_true("unclassified_node_is_not_called_disk",
+                entry.type == BYTHOS_EFI_BOOT_TYPE_UNKNOWN);
+        }
+    }
+
     printf("efi boot parser: all tests passed\n");
     return 0;
 }
