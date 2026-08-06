@@ -82,7 +82,7 @@ $ sudo bythos
 
   luks:
     ok    TPM binding  TPM2 token on 1 device
-    ok    boot chain binding  PCRs: 4 7 9; firmware and full boot chain measured
+    ok    boot chain binding  PCRs: 4 7 9; boot chain measured
 
   platform firmware:
     ok    Intel BIOS write protection  BLE and SMM_BWP set; BIOS region protected
@@ -95,20 +95,44 @@ $ sudo bythos
     ok    HSI: Boot Guard  enabled and verified
 ```
 
-## Quick Start
+## Install
+
+Grab the latest build from
+[Releases](https://github.com/q1sh101/bythos/releases) and check it against
+`SHA256SUMS`. Any x86_64 Linux with glibc 2.34 or newer works: Debian 12+,
+Ubuntu 22.04+, Fedora, Arch.
+
+```bash
+# debian / ubuntu
+sudo apt install ./bythos_0.1.0_amd64.deb
+
+# any x86_64 linux
+tar -xzf bythos-v0.1.0-x86_64-linux.tar.gz
+cd bythos-v0.1.0-x86_64-linux
+sudo install -Dm 0755 bythos /usr/local/bin/bythos
+sudo install -Dm 0644 bythos.1 /usr/local/share/man/man1/bythos.1
+```
+
+### From source
+
+Needs a C11 compiler and GNU Make (`gcc make` on most distributions).
 
 ```bash
 git clone https://github.com/q1sh101/bythos
 cd bythos && make && sudo make install
+```
 
+Install paths can be overridden with `prefix`, `bindir`, `mandir`, `DESTDIR`.
+Remove with `sudo make uninstall`.
+
+## Quick Start
+
+```bash
 sudo bythos       # requires root for full coverage
 bythos --json     # machine-readable output
 bythos --help
 bythos --version
 ```
-
-Install paths can be overridden with `prefix`, `bindir`, `mandir`, `DESTDIR`.
-Remove with `sudo make uninstall`.
 
 ## How It Works
 
@@ -152,7 +176,7 @@ degrade their checks to `skip`, never `fail`.
 | `skip` | Not applicable or not observable on this run |
 
 `skip` is not a hidden pass. It means bythos could not make that observation:
-hardware absent, helper missing, field absent, root required, vendor mismatch,
+hardware absent, helper missing, field absent, not configured, vendor mismatch,
 or output unparseable, among other typed reasons (full list in `man bythos`).
 
 Plain output uses lowercase labels. `--json` capitalizes them (`OK`, `WARN`,
@@ -222,4 +246,4 @@ Human-written PRs only; LLM-generated submissions are not accepted.
 
 Built for engineers who care about firmware trust.
 
-**Built by** Giorgi Kishmareia · [q1sh101](https://github.com/q1sh101)
+**Built by** Giorgi Kishmareia
