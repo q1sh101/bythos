@@ -10,12 +10,25 @@
 #include "firmware_parsers.h"
 #include "runtime.h"
 
+#define EFI_EFIVARS_DIR  "/sys/firmware/efi/efivars"
 #define EFI_SIGDB_GUID   "d719b2cb-3d3a-4596-a3bc-dad00e67656f"
 #define EFI_SBAT_GUID    "605dab50-e046-4300-abb6-3dd810dd8b23"
-#define EFI_DB_PATH      "/sys/firmware/efi/efivars/db-"  EFI_SIGDB_GUID
-#define EFI_DBX_PATH     "/sys/firmware/efi/efivars/dbx-" EFI_SIGDB_GUID
-#define EFI_SBAT_RT_PATH "/sys/firmware/efi/efivars/SbatLevelRT-" EFI_SBAT_GUID
-#define EFI_SBAT_PATH    "/sys/firmware/efi/efivars/SbatLevel-"   EFI_SBAT_GUID
+#define EFI_DB_PATH      EFI_EFIVARS_DIR "/db-"  EFI_SIGDB_GUID
+#define EFI_DBX_PATH     EFI_EFIVARS_DIR "/dbx-" EFI_SIGDB_GUID
+#define EFI_SBAT_RT_PATH EFI_EFIVARS_DIR "/SbatLevelRT-" EFI_SBAT_GUID
+#define EFI_SBAT_PATH    EFI_EFIVARS_DIR "/SbatLevel-"   EFI_SBAT_GUID
+#define EFI_GLOBAL_GUID  "8be4df61-93ca-11d2-aa0d-00e098032b8c"
+#define EFI_SB_STATE_PATH  EFI_EFIVARS_DIR "/SecureBoot-" EFI_GLOBAL_GUID
+#define EFI_SETUP_MODE_PATH EFI_EFIVARS_DIR "/SetupMode-" EFI_GLOBAL_GUID
+
+static bool read_efi_bool_var(const char *path, bool *value) {
+    unsigned char buf[8];
+    size_t len = 0;
+    if (!bythos_read_file_binary(path, buf, sizeof(buf), &len)) {
+        return false;
+    }
+    return bythos_parse_efi_bool_var(buf, len, value);
+}
 
 static void check_sigdb_variable(const char *path, const char *name,
                                  bool efi_visible,
@@ -39,8 +52,15 @@ static void check_sigdb_variable(const char *path, const char *name,
 
     unsigned char buf[65536];
     size_t len = 0;
-    if (!bythos_read_file_binary(path, buf, sizeof(buf), &len)) {
-        results[(*used)++] = make_result(name, CHECK_WARN, "variable unreadable");
+    bool truncated = false;
+    if (!bythos_read_file_binary_ex(path, buf, sizeof(buf), &len, &truncated)) {
+        results[(*used)++] = make_skip(name, SKIP_EXEC_FAILED, "variable read failed");
+        return;
+    }
+
+    if (truncated) {
+        results[(*used)++] = make_result(name, CHECK_WARN,
+            "larger than this tool reads; contents not verified");
         return;
     }
 
@@ -68,11 +88,29 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
         bythos_probe_mok_ownership(&ownership);
     }
 
+    bool efivar_sb = false;
+    bool efivar_sb_known = read_efi_bool_var(EFI_SB_STATE_PATH, &efivar_sb);
+    bool efivar_setup = false;
+    bool efivar_setup_known = read_efi_bool_var(EFI_SETUP_MODE_PATH, &efivar_setup);
+
     int sb_exit = -1;
-    if (!has_mokutil) {
-        EMIT_SKIP_TOOL_INSTALL("secure boot state", "mokutil");
+    if (efivar_sb_known) {
+        state = efivar_sb ? BYTHOS_SECURE_BOOT_ENABLED : BYTHOS_SECURE_BOOT_DISABLED;
+        if (has_mokutil) {
+            have_state_output = bythos_capture_argv_status(
+                mokutil_state_argv, state_buffer, sizeof(state_buffer), &sb_exit) &&
+                sb_exit == 0 &&
+                bythos_parse_secure_boot_state(state_buffer) != BYTHOS_SECURE_BOOT_UNKNOWN;
+        }
+        if (efivar_sb) {
+            EMIT("secure boot state", CHECK_OK, "Secure Boot enabled");
+        } else {
+            EMIT("secure boot state", CHECK_FAIL, "Secure Boot disabled");
+        }
+    } else if (!has_mokutil) {
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("secure boot state", "mokutil", "mokutil");
     } else if (!bythos_capture_argv_status(mokutil_state_argv, state_buffer, sizeof(state_buffer), &sb_exit) || sb_exit != 0) {
-        EMIT("secure boot state", CHECK_WARN, "unable to query");
+        EMIT_SKIP_EXEC("secure boot state", "mokutil");
     /* Disabled Secure Boot is a direct posture regression for this layer, so keep it as FAIL. */
     } else if ((state = bythos_parse_secure_boot_state(state_buffer)) == BYTHOS_SECURE_BOOT_ENABLED) {
         have_state_output = true;
@@ -81,12 +119,17 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
         have_state_output = true;
         EMIT("secure boot state", CHECK_FAIL, "Secure Boot disabled");
     } else {
-        have_state_output = true;
-        EMIT("secure boot state", CHECK_WARN, "mokutil output not recognized");
+        EMIT_SKIP_PARSE("secure boot state", "mokutil");
     }
 
-    if (!has_mokutil) {
-        EMIT_SKIP_TOOL_INSTALL("secure boot setup mode", "mokutil");
+    if (efivar_setup_known) {
+        if (efivar_setup) {
+            EMIT("secure boot setup mode", CHECK_WARN, "enabled");
+        } else {
+            EMIT("secure boot setup mode", CHECK_OK, "disabled");
+        }
+    } else if (!has_mokutil) {
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("secure boot setup mode", "mokutil", "mokutil");
     } else if (!have_state_output) {
         EMIT_SKIP_PROBE("secure boot setup mode", "mokutil");
     } else if (bythos_secure_boot_setup_mode(state_buffer)) {
@@ -96,10 +139,10 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     }
 
     if (!has_mokutil) {
-        EMIT_SKIP_TOOL_INSTALL("shim validation", "mokutil");
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("shim validation", "mokutil", "mokutil");
     } else if (state == BYTHOS_SECURE_BOOT_DISABLED) {
         EMIT_SKIP("shim validation", SKIP_FEATURE_ABSENT, "Secure Boot not enabled");
-    } else if (state != BYTHOS_SECURE_BOOT_ENABLED) {
+    } else if (state != BYTHOS_SECURE_BOOT_ENABLED || !have_state_output) {
         EMIT_SKIP_PROBE("shim validation", "mokutil");
     } else if (bythos_secure_boot_validation_disabled(state_buffer)) {
         EMIT("shim validation", CHECK_FAIL, "disabled; shim boots unsigned images");
@@ -108,7 +151,7 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     }
 
     if (!has_mokutil) {
-        EMIT_SKIP_TOOL_INSTALL("platform key owner", "mokutil");
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("platform key owner", "mokutil", "mokutil");
     } else if (!ownership.owner_readable) {
         EMIT_SKIP_EXEC("platform key owner", "mokutil");
     } else if (ownership.owner_parsed) {
@@ -118,7 +161,7 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     }
 
     if (!has_mokutil) {
-        EMIT_SKIP_TOOL_INSTALL("MOK enrollments", "mokutil");
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("MOK enrollments", "mokutil", "mokutil");
     } else if (!ownership.enrollments_readable) {
         EMIT_SKIP_EXEC("MOK enrollments", "mokutil");
     } else {
@@ -149,8 +192,13 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     } else {
         unsigned char dbx_buf[65536];
         size_t dbx_len = 0;
-        if (!bythos_read_file_binary(EFI_DBX_PATH, dbx_buf, sizeof(dbx_buf), &dbx_len)) {
+        bool dbx_truncated = false;
+        if (!bythos_read_file_binary_ex(EFI_DBX_PATH, dbx_buf, sizeof(dbx_buf),
+                                        &dbx_len, &dbx_truncated)) {
             EMIT_SKIP_EXEC("Secure Boot dbx size", "EFI dbx");
+        } else if (dbx_truncated) {
+            EMIT("Secure Boot dbx size", CHECK_WARN,
+                "larger than this tool reads; size not verified");
         } else if (dbx_len <= 4u) {
             EMIT("Secure Boot dbx size", CHECK_WARN, "dbx empty; no revocations");
         } else {
@@ -173,8 +221,13 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     } else {
         unsigned char db_buf[65536];
         size_t db_len = 0;
-        if (!bythos_read_file_binary(EFI_DB_PATH, db_buf, sizeof(db_buf), &db_len)) {
+        bool db_truncated = false;
+        if (!bythos_read_file_binary_ex(EFI_DB_PATH, db_buf, sizeof(db_buf),
+                                        &db_len, &db_truncated)) {
             EMIT_SKIP_EXEC("Secure Boot db keys", "EFI db");
+        } else if (db_truncated) {
+            EMIT("Secure Boot db keys", CHECK_WARN,
+                "larger than this tool reads; key lists not counted");
         } else {
             size_t lists = bythos_count_efi_sigdb_lists(db_buf, db_len);
             if (lists == 0) {
@@ -208,13 +261,19 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
         } else {
             unsigned char sbat_buf[256];
             size_t sbat_len = 0;
-            if (!bythos_read_file_binary(sbat_path, sbat_buf, sizeof(sbat_buf), &sbat_len) ||
-                sbat_len <= 4u) {
-                EMIT("SBAT policy level", CHECK_WARN, "SbatLevel variable unreadable");
+            bool sbat_truncated = false;
+            if (!bythos_read_file_binary_ex(sbat_path, sbat_buf, sizeof(sbat_buf),
+                                            &sbat_len, &sbat_truncated)) {
+                EMIT_SKIP_EXEC("SBAT policy level", "SbatLevel");
+            } else if (sbat_truncated) {
+                EMIT("SBAT policy level", CHECK_WARN,
+                    "larger than this tool reads; policy level not verified");
+            } else if (sbat_len <= 4u) {
+                EMIT("SBAT policy level", CHECK_WARN, "visible but empty");
             } else {
                 char sbat_line[64] = {0};
                 if (!bythos_parse_sbat_level(sbat_buf, sbat_len, sbat_line, sizeof(sbat_line))) {
-                    EMIT("SBAT policy level", CHECK_WARN, "SbatLevel variable unreadable");
+                    EMIT("SBAT policy level", CHECK_WARN, "visible but unparseable");
                 } else {
                     char detail[BYTHOS_DETAIL_MAX];
                     snprintf(detail, sizeof(detail), "SbatLevel: %s", sbat_line);
@@ -225,7 +284,7 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     }
 
     if (!has_mokutil) {
-        EMIT_SKIP_TOOL_INSTALL("Secure Boot trust breadth", "mokutil");
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("Secure Boot trust breadth", "mokutil", "mokutil");
     } else {
         static const char *const db_argv[] = {"mokutil", "--db", NULL};
         char db_buf[131072] = {0};
@@ -249,9 +308,15 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     {
         char mounts_buf[65536] = {0};
         char opts[256] = {0};
-        if (!bythos_read_file_text("/proc/mounts", mounts_buf, sizeof(mounts_buf))) {
-            EMIT_SKIP_EXEC("efivarfs mount mode", "proc/mounts");
-        } else if (!bythos_find_mount_opts(mounts_buf, "efivarfs", opts, sizeof(opts))) {
+        bool mounts_truncated = false;
+        if (!bythos_read_file_text_ex("/proc/mounts", mounts_buf, sizeof(mounts_buf),
+                                      &mounts_truncated)) {
+            EMIT_SKIP_EXEC("efivarfs mount mode", "/proc/mounts");
+        } else if (mounts_truncated) {
+            EMIT_SKIP("efivarfs mount mode", SKIP_PROBE_INDETERMINATE,
+                "mount table larger than this tool reads");
+        } else if (!bythos_find_mount_entry(mounts_buf, EFI_EFIVARS_DIR, NULL, 0,
+                                            opts, sizeof(opts))) {
             EMIT_SKIP_FEATURE("efivarfs mount mode", "efivarfs");
         } else if (strcmp(opts, "ro") == 0 || strncmp(opts, "ro,", 3) == 0) {
             EMIT("efivarfs mount mode", CHECK_OK, "read-only");

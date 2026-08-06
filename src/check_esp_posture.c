@@ -52,7 +52,8 @@ static size_t check_esp_permissions(check_result_t *results, size_t max_results)
     }
 
     if (!esp_found) {
-        EMIT_SKIP("ESP mount", SKIP_FEATURE_ABSENT, "not accessible at /boot/efi, /efi, or /boot");
+        EMIT_SKIP("ESP ownership", SKIP_FEATURE_ABSENT,
+            "ESP not accessible at /boot/efi, /efi, or /boot");
         return used;
     }
     if (st.st_uid != 0) {
@@ -73,25 +74,26 @@ static size_t check_esp_filesystem(check_result_t *results, size_t max_results) 
     if (used >= max_results) return used;
 
     char mounts[65536] = {0};
-    if (!bythos_read_file_text("/proc/mounts", mounts, sizeof(mounts))) {
+    bool mounts_truncated = false;
+    if (!bythos_read_file_text_ex("/proc/mounts", mounts, sizeof(mounts),
+                                  &mounts_truncated)) {
         EMIT_SKIP_EXEC("ESP filesystem", "/proc/mounts");
+        return used;
+    }
+    if (mounts_truncated) {
+        EMIT_SKIP("ESP filesystem", SKIP_PROBE_INDETERMINATE,
+            "mount table larger than this tool reads");
         return used;
     }
 
     for (size_t i = 0; i < ESP_CANDIDATE_COUNT; i++) {
         if (!bythos_file_exists(ESP_CANDIDATES[i].efi_dir)) continue;
 
-        char marker[64];
-        snprintf(marker, sizeof(marker), " %s ", ESP_CANDIDATES[i].mount);
-        const char *line = strstr(mounts, marker);
-        if (line == NULL) continue;
-
-        const char *fstype_start = line + strlen(marker);
-        size_t fstype_len = strcspn(fstype_start, " \t\r\n");
-        if (fstype_len == 0 || fstype_len >= 64) continue;
-
         char fstype[64] = {0};
-        memcpy(fstype, fstype_start, fstype_len);
+        if (!bythos_find_mount_entry(mounts, ESP_CANDIDATES[i].mount,
+                                     fstype, sizeof(fstype), NULL, 0)) {
+            continue;
+        }
 
         if (strcmp(fstype, "vfat") == 0) {
             EMIT("ESP filesystem", CHECK_OK, "vfat");
@@ -286,8 +288,15 @@ static size_t check_update_capsule(check_result_t *results, size_t max_results) 
     size_t used = 0;
     if (used >= max_results) return used;
 
+    const char *esp_base = bythos_esp_efi_base();
+    if (!bythos_file_exists(esp_base)) {
+        EMIT_SKIP("ESP UpdateCapsule", SKIP_FEATURE_ABSENT,
+            "ESP not accessible at /boot/efi, /efi, or /boot");
+        return used;
+    }
+
     char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/UpdateCapsule", bythos_esp_efi_base());
+    snprintf(path, sizeof(path), "%s/UpdateCapsule", esp_base);
     errno = 0;
     DIR *dir = opendir(path);
     if (dir == NULL) {
@@ -332,9 +341,6 @@ size_t bythos_check_esp_posture(check_result_t *results, size_t max_results) {
 
     remaining = max_results - used;
     used += check_esp_permissions(results + used, remaining);
-
-    /* Without an ESP, the remaining checks have no input. */
-    if (used > 0 && results[used - 1].state == CHECK_SKIP) return used;
 
     remaining = max_results - used;
     used += check_esp_filesystem(results + used, remaining);

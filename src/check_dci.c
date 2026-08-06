@@ -71,7 +71,7 @@ size_t bythos_check_dci(check_result_t *results, size_t max_results) {
     if (enabled) {
         results[used++] = make_result("Intel DCI", CHECK_FAIL,
             locked ? "DCI enabled and locked (cannot be disabled without reboot)"
-                   : "DCI enabled - USB-C debug access possible");
+                   : "DCI enabled; USB-C debug access possible");
     } else if (locked) {
         results[used++] = make_result("Intel DCI", CHECK_OK, "DCI disabled and locked");
     } else {
@@ -87,6 +87,10 @@ size_t bythos_check_chipsec(check_result_t *results, size_t max_results) {
     if (bythos_command_exists("chipsec_main") || bythos_command_exists("chipsec")) {
         EMIT_SKIP("platform firmware deep audit", SKIP_NOT_CONFIGURED,
             "chipsec available; run manually for a deep audit");
+    } else if (bythos_command_untrusted("chipsec_main") ||
+               bythos_command_untrusted("chipsec")) {
+        EMIT("platform firmware deep audit", CHECK_WARN,
+            "chipsec on PATH is not root-owned; refusing to run it as root");
     } else {
         EMIT_SKIP_TOOL_INSTALL("platform firmware deep audit", "chipsec");
     }

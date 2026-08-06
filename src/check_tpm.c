@@ -86,10 +86,10 @@ size_t bythos_check_tpm(check_result_t *results, size_t max_results) {
         if (!tpm_present) {
             EMIT_SKIP_HW("DA lockout", "TPM");
         } else if (!bythos_command_exists("tpm2_getcap")) {
-            EMIT_SKIP_TOOL_INSTALL("DA lockout", "tpm2-tools");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("DA lockout", "tpm2_getcap", "tpm2-tools");
         } else if (!bythos_capture_argv_status(getcap_argv, buf, sizeof(buf), &exit_status) ||
                    exit_status != 0) {
-            EMIT_SKIP_EXEC("DA lockout", "tpm2_getcap");
+            EMIT_SKIP_EXEC_ROOT("DA lockout", "tpm2_getcap");
         } else if (!parse_max_auth_fail(buf, &max_auth_fail)) {
             EMIT_SKIP_PARSE("DA lockout", "tpm2_getcap");
         } else {
@@ -122,10 +122,10 @@ size_t bythos_check_tpm(check_result_t *results, size_t max_results) {
         if (!tpm_present) {
             EMIT_SKIP_HW("TPM PCR 7", "TPM");
         } else if (!bythos_command_exists("tpm2_pcrread")) {
-            EMIT_SKIP_TOOL_INSTALL("TPM PCR 7", "tpm2-tools");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("TPM PCR 7", "tpm2_pcrread", "tpm2-tools");
         } else if (!bythos_capture_argv_status(pcr7_argv, buf, sizeof(buf), &exit_status) ||
                    exit_status != 0) {
-            EMIT_SKIP_EXEC("TPM PCR 7", "tpm2_pcrread");
+            EMIT_SKIP_EXEC_ROOT("TPM PCR 7", "tpm2_pcrread");
         } else {
             int z = bythos_pcr_zero_check(buf, 7);
             if (z < 0) {
@@ -146,10 +146,10 @@ size_t bythos_check_tpm(check_result_t *results, size_t max_results) {
         if (!tpm_present) {
             EMIT_SKIP_HW("TPM PCR 0", "TPM");
         } else if (!bythos_command_exists("tpm2_pcrread")) {
-            EMIT_SKIP_TOOL_INSTALL("TPM PCR 0", "tpm2-tools");
+            EMIT_SKIP_TOOL_OR_UNTRUSTED("TPM PCR 0", "tpm2_pcrread", "tpm2-tools");
         } else if (!bythos_capture_argv_status(pcr0_argv, buf, sizeof(buf), &exit_status) ||
                    exit_status != 0) {
-            EMIT_SKIP_EXEC("TPM PCR 0", "tpm2_pcrread");
+            EMIT_SKIP_EXEC_ROOT("TPM PCR 0", "tpm2_pcrread");
         } else {
             int z = bythos_pcr_zero_check(buf, 0);
             if (z < 0) {
@@ -189,7 +189,7 @@ size_t bythos_check_tpm(check_result_t *results, size_t max_results) {
                 }
                 fclose(f);
                 if (found) {
-                    EMIT("TPM event log ASCII", CHECK_OK, "CRTM version event present");
+                    EMIT("TPM event log ASCII", CHECK_OK, "S-CRTM Version event present");
                 } else {
                     EMIT("TPM event log ASCII", CHECK_WARN, "S-CRTM Version event absent");
                 }

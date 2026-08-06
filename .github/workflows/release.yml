@@ -1,0 +1,97 @@
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: build + publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc make
+
+      - name: tag matches BYTHOS_VERSION
+        run: |
+          src=$(sed -n 's/^#define BYTHOS_VERSION "\(.*\)"$/\1/p' src/main.c)
+          if [ "v$src" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match BYTHOS_VERSION $src" >&2
+            exit 1
+          fi
+
+      - name: unit suite
+        run: make ci-test
+
+      - name: build release binary
+        run: |
+          make clean
+          make
+          strip bythos
+          ./bythos --version
+          file bythos
+
+      - name: package tarball
+        run: |
+          dir="bythos-${GITHUB_REF_NAME}-x86_64-linux"
+          mkdir "$dir"
+          cp bythos README.md LICENSE "$dir/"
+          cp man/bythos.1 "$dir/"
+          tar -czf "$dir.tar.gz" "$dir"
+
+      - name: package deb
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          glibc=$(objdump -T bythos | grep -oP 'GLIBC_\K[0-9.]+' | sort -V | tail -1)
+          root=debroot
+          make install DESTDIR="$root" prefix=/usr
+          gzip -9n "$root/usr/share/man/man1/bythos.1"
+          install -d "$root/usr/share/doc/bythos" "$root/DEBIAN"
+          install -m 0644 LICENSE "$root/usr/share/doc/bythos/copyright"
+          printf 'bythos (%s) stable; urgency=low\n\n  * Release %s\n\n -- Giorgi Kishmareia <q1sh101@users.noreply.github.com>  %s\n' \
+            "$ver" "$GITHUB_REF_NAME" "$(date -R)" | gzip -9n > "$root/usr/share/doc/bythos/changelog.gz"
+          cat > "$root/DEBIAN/control" <<EOF
+          Package: bythos
+          Version: $ver
+          Section: admin
+          Priority: optional
+          Architecture: amd64
+          Depends: libc6 (>= $glibc)
+          Maintainer: Giorgi Kishmareia <q1sh101@users.noreply.github.com>
+          Homepage: https://github.com/q1sh101/bythos
+          Description: read-only firmware trust posture auditor
+           Inspects the firmware trust surface of a Linux host and reports each
+           finding with an explicit posture state. Reads sysfs, procfs and EFI
+           variables; never modifies host configuration.
+          EOF
+          chmod -R go+rX "$root"
+          dpkg-deb --root-owner-group --build "$root" "bythos_${ver}_amd64.deb"
+          dpkg-deb -I "bythos_${ver}_amd64.deb"
+
+      - name: checksums
+        run: |
+          sha256sum bythos-*.tar.gz bythos_*.deb > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            bythos-*.tar.gz bythos_*.deb SHA256SUMS \
+          || gh release upload "$GITHUB_REF_NAME" --clobber \
+            bythos-*.tar.gz bythos_*.deb SHA256SUMS

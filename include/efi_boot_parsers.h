@@ -26,6 +26,7 @@ typedef struct {
 typedef struct {
     uint16_t order[BYTHOS_EFI_BOOT_MAX_ENTRIES];
     size_t order_count;
+    bool truncated;
 } bythos_efi_boot_order_t;
 
 bool bythos_parse_efi_boot_order(const unsigned char *data, size_t len,
@@ -37,6 +38,8 @@ bool bythos_parse_efi_boot_entry(const unsigned char *data, size_t len,
 
 bool bythos_parse_efi_boot_next(const unsigned char *data, size_t len,
                                     uint16_t *number);
+
+bool bythos_parse_efi_bool_var(const unsigned char *data, size_t len, bool *value);
 
 /* Secure Boot signature database (db/dbx): count of well-formed EFI_SIGNATURE_LISTs */
 size_t bythos_count_efi_sigdb_lists(const unsigned char *data, size_t len);

@@ -34,8 +34,9 @@ key management state
 .IP \(bu 2
 .B boot chain
 \- bootloader version, bootloader SBAT generation versus current
-revocation policy, shim signature presence, initramfs permissions,
-SBAT revocation list visibility, EFI BootOrder USB / network / CD
+revocation policy, shim signature presence, ownership and write
+permissions of files under \fI/boot\fR, SBAT revocation list
+visibility, EFI BootOrder USB / network / CD
 entries and BootNext one-shot override, EFI BootOrder immutable flag,
 BIOS USB boot firmware-attributes setting, SMBIOS Type 24 firmware
 admin / power-on / keyboard password slots
@@ -110,7 +111,9 @@ Direct posture regression (for example, Secure Boot disabled).
 .TP
 .B skip
 Probe could not run. A missing optional dependency normally produces
-\fBskip\fR, not \fBwarn\fR.
+\fBskip\fR, not \fBwarn\fR. A dependency that is present but refused as
+untrusted is a posture finding and produces \fBwarn\fR instead; see
+.B DEPENDENCIES.
 .PP
 Plain output begins with the banner and overall summary, then prints one
 flat block per subgroup. There is no per-subgroup or trailing recap.
@@ -149,6 +152,10 @@ Read-only paths grouped by purpose. None are written.
 .I /sys/firmware/efi
 .TP
 .I /sys/firmware/efi/esrt/entries
+.TP
+.I /sys/firmware/efi/efivars/SecureBoot-*
+.TP
+.I /sys/firmware/efi/efivars/SetupMode-*
 .TP
 .I /sys/firmware/efi/efivars/db-*
 .TP
@@ -200,6 +207,8 @@ Read-only paths grouped by purpose. None are written.
 .I /proc/cmdline
 .TP
 .I /proc/mounts
+.TP
+.I /sys/devices/system/cpu/vulnerabilities
 .RE
 .PP
 .B ESP candidates:
@@ -238,6 +247,13 @@ present; absence demotes the dependent checks to \fBskip\fR rather
 than \fBfail\fR. Most are invoked to read posture data; the chipsec
 deep-audit helpers and \fBspectre-meltdown-checker\fR are detected for
 availability only, since their full audits are out of bythos scope.
+.PP
+Helpers are resolved against a compile-time PATH. Because bythos may
+run as root, a helper runs only if the binary it resolves to is owned
+by root and is not group- or world-writable. One that fails this test
+is never executed; its checks report \fBwarn\fR naming the reason,
+since an untrusted executable on a system path is itself a posture
+finding.
 .IP \(bu 2
 .BR mokutil (1)
 \- Secure Boot state, setup mode, platform key owner, MOK enrollment
@@ -304,8 +320,12 @@ on older PCH) for the BIOS_CNTL register.
 .IP \(bu 2
 SMBIOS Type 24 firmware password slots via \fBdmidecode\fR(8).
 .IP \(bu 2
-LUKS TPM binding read via \fBcryptsetup\fR(8) \fBluksDump\fR on raw
-LUKS block devices.
+TPM dictionary-attack lockout policy and PCR 0 / PCR 7 reads via
+\fBtpm2_getcap\fR(1) and \fBtpm2_pcrread\fR(1), which need access to
+the TPM resource manager device.
+.IP \(bu 2
+LUKS header, dm-integrity, and TPM binding reads via
+\fBcryptsetup\fR(8) \fBluksDump\fR on raw LUKS block devices.
 .PP
 Without root these probes emit \fBskip\fR with \fB(requires root)\fR in
 plain output and \fBrequires_root: true\fR in JSON.

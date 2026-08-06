@@ -183,6 +183,125 @@ int main(void) {
         BYTHOS_SERVICE_STATE_UNKNOWN
     );
 
+    {
+        const char *path = "/tmp/bythos_test_truncation.bin";
+        FILE *f = fopen(path, "wb");
+        assert_true("truncation_fixture_created", f != NULL);
+        for (int i = 0; i < 200; i++) {
+            fputc(i & 0xFF, f);
+        }
+        fclose(f);
+
+        unsigned char small[100];
+        size_t n = 0;
+        bool truncated = false;
+        assert_true("short_buffer_reads",
+            bythos_read_file_binary_ex(path, small, sizeof(small), &n, &truncated));
+        assert_true("short_buffer_reports_truncation", truncated && n == sizeof(small));
+
+        unsigned char roomy[400];
+        n = 0;
+        truncated = false;
+        assert_true("roomy_buffer_reads",
+            bythos_read_file_binary_ex(path, roomy, sizeof(roomy), &n, &truncated));
+        assert_true("roomy_buffer_reports_no_truncation", !truncated && n == 200);
+
+        unsigned char exact[200];
+        n = 0;
+        truncated = false;
+        assert_true("exact_buffer_reads",
+            bythos_read_file_binary_ex(path, exact, sizeof(exact), &n, &truncated));
+        assert_true("exact_fit_is_not_truncation", !truncated && n == sizeof(exact));
+
+        truncated = true;
+        assert_false("missing_file_clears_the_flag",
+            bythos_read_file_binary_ex("/tmp/bythos_absent_probe", exact,
+                                       sizeof(exact), &n, &truncated));
+        assert_false("missing_file_leaves_flag_false", truncated);
+
+        char text_small[100];
+        truncated = false;
+        assert_true("text_short_buffer_reads",
+            bythos_read_file_text_ex(path, text_small, sizeof(text_small), &truncated));
+        assert_true("text_short_buffer_reports_truncation", truncated);
+
+        char text_roomy[400];
+        truncated = false;
+        assert_true("text_roomy_buffer_reads",
+            bythos_read_file_text_ex(path, text_roomy, sizeof(text_roomy), &truncated));
+        assert_false("text_roomy_buffer_reports_no_truncation", truncated);
+
+        char text_exact[201];
+        truncated = false;
+        assert_true("text_exact_buffer_reads",
+            bythos_read_file_text_ex(path, text_exact, sizeof(text_exact), &truncated));
+        assert_false("text_exact_fit_is_not_truncation", truncated);
+
+        remove(path);
+    }
+
+    {
+        static const char OVERMOUNTED[] =
+            "/dev/sda1 /boot ext4 rw,relatime 0 0\n"
+            "/dev/sdb1 /boot vfat rw,uid=1000 0 0\n";
+        char fstype[64] = {0};
+        char opts[128] = {0};
+
+        assert_true("overmount_is_found",
+            bythos_find_mount_entry(OVERMOUNTED, "/boot", fstype, sizeof(fstype),
+                                    opts, sizeof(opts)));
+        assert_true("effective_mount_is_the_last_one", strcmp(fstype, "vfat") == 0);
+        assert_true("effective_options_come_from_the_last_one",
+            strcmp(opts, "rw,uid=1000") == 0);
+
+        static const char DECOY_FIRST[] =
+            "efivarfs /mnt/decoy efivarfs ro,relatime 0 0\n"
+            "efivarfs /sys/firmware/efi/efivars efivarfs rw,relatime 0 0\n";
+        opts[0] = '\0';
+        assert_true("decoy_does_not_answer_for_another_mount_point",
+            bythos_find_mount_entry(DECOY_FIRST, "/sys/firmware/efi/efivars",
+                                    NULL, 0, opts, sizeof(opts)));
+        assert_true("real_mount_point_keeps_its_own_options",
+            strcmp(opts, "rw,relatime") == 0);
+
+        static const char DECOY_LAST[] =
+            "efivarfs /sys/firmware/efi/efivars efivarfs rw,relatime 0 0\n"
+            "efivarfs /mnt/decoy efivarfs ro,relatime 0 0\n";
+        opts[0] = '\0';
+        assert_true("trailing_decoy_is_ignored_too",
+            bythos_find_mount_entry(DECOY_LAST, "/sys/firmware/efi/efivars",
+                                    NULL, 0, opts, sizeof(opts)));
+        assert_true("trailing_decoy_does_not_change_options",
+            strcmp(opts, "rw,relatime") == 0);
+
+        assert_false("absent_mount_point_is_reported_absent",
+            bythos_find_mount_entry(OVERMOUNTED, "/srv", fstype, sizeof(fstype),
+                                    NULL, 0));
+
+        char narrow[3] = {0};
+        assert_false("fstype_too_long_for_the_buffer_is_refused",
+            bythos_find_mount_entry(OVERMOUNTED, "/boot", narrow, sizeof(narrow),
+                                    NULL, 0));
+
+        static const char PREFIX_ONLY[] = "/dev/sda1 /boots ext4 rw 0 0\n";
+        assert_false("a_longer_mount_point_is_not_a_match",
+            bythos_find_mount_entry(PREFIX_ONLY, "/boot", fstype, sizeof(fstype),
+                                    NULL, 0));
+
+        static const char TRUNCATED_LINE[] = "/dev/sda1 \n";
+        assert_false("an_empty_mount_point_never_matches",
+            bythos_find_mount_entry(TRUNCATED_LINE, "", NULL, 0, NULL, 0));
+
+        char keep[64];
+        memcpy(keep, "untouched", sizeof("untouched"));
+        char tiny[3] = {0};
+        assert_false("a_refused_lookup_writes_neither_output",
+            bythos_find_mount_entry(OVERMOUNTED, "/boot", keep, sizeof(keep),
+                                    tiny, sizeof(tiny)));
+        assert_true("the_fstype_buffer_is_left_alone",
+            strcmp(keep, "untouched") == 0);
+    }
+
     printf("runtime capture ok\n");
     return 0;
 }

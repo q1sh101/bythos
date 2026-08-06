@@ -307,6 +307,40 @@ static bool extract_quoted_value(const char *key_pos, size_t key_len,
     return true;
 }
 
+size_t bythos_hsi_count_not_passing(const char *json) {
+    static const char APPSTREAM_ID_KEY[] = "\"AppstreamId\"";
+    static const char FLAGS_KEY[]        = "\"Flags\"";
+    static const char SUCCESS_TOKEN[]    = "\"success\"";
+
+    if (json == NULL) {
+        return 0;
+    }
+
+    size_t not_passing = 0;
+    const char *cursor = json;
+    while (*cursor != '\0') {
+        const char *id_key = strstr(cursor, APPSTREAM_ID_KEY);
+        if (id_key == NULL) {
+            break;
+        }
+        const char *next_id = strstr(id_key + sizeof(APPSTREAM_ID_KEY) - 1,
+                                     APPSTREAM_ID_KEY);
+        const char *bound = next_id != NULL ? next_id : id_key + strlen(id_key);
+
+        const char *flags_key = strstr(id_key, FLAGS_KEY);
+        bool passing = false;
+        if (flags_key != NULL && flags_key < bound) {
+            const char *tok = strstr(flags_key, SUCCESS_TOKEN);
+            passing = tok != NULL && tok < bound;
+        }
+        if (!passing) {
+            not_passing++;
+        }
+        cursor = next_id != NULL ? next_id : bound;
+    }
+    return not_passing;
+}
+
 bool bythos_hsi_find_attribute(const char *json, const char *appstream_id,
                                    bythos_hsi_attribute_t *out) {
     static const char APPSTREAM_ID_KEY[] = "\"AppstreamId\"";
@@ -354,6 +388,9 @@ bool bythos_hsi_find_attribute(const char *json, const char *appstream_id,
 
             const char *flags_key = strstr(q2 + 1, FLAGS_KEY);
             if (flags_key != NULL && flags_key < bound) {
+                const char *success_token = strstr(flags_key, "\"success\"");
+                out->passing = success_token != NULL && success_token < bound;
+
                 const char *open  = strchr(flags_key + sizeof(FLAGS_KEY) - 1, '[');
                 const char *close = open != NULL ? strchr(open, ']') : NULL;
                 if (open != NULL && close != NULL && close < bound) {
