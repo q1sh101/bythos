@@ -2,6 +2,14 @@
 
 ![Linux](https://img.shields.io/badge/Linux-FFA500?logo=linux&logoColor=black&labelColor=FFA500) ![C11](https://img.shields.io/badge/C11-A8B9CC?logo=c&logoColor=black&labelColor=A8B9CC) ![Zero--deps](https://img.shields.io/badge/Zero--deps-brightgreen.svg) ![UEFI](https://img.shields.io/badge/UEFI-firmware%20trust-7B68EE?labelColor=7B68EE)
 
+```text
+  ______     __  __     ______    __  __     ______     ______        _____ ___ _____ ___
+ /\  == \   /\ \_\ \   /\__  _\  /\ \_\ \   /\  __ \   /\  ___\      |_____|___|_____|___|
+ \ \  __<   \ \____ \  \/_/\ \/  \ \  __ \  \ \ \/\ \  \ \___  \     |___|___|_____|_____|
+  \ \_____\  \/\_____\    \ \_\   \ \_\ \_\  \ \_____\  \/\_____\    |_____|_____|___|___|
+   \/_____/   \/_____/     \/_/    \/_/\/_/   \/_____/   \/_____/    |___|___|_____|_____|
+```
+
 Read-only firmware trust posture auditor for Linux. Single C11 binary, no
 daemon, zero third-party deps.
 
@@ -27,7 +35,7 @@ bythos does not harden. It reads, classifies, prints, exits.
 +===================+=====================================================================+
 | EFI               | EFI boot mode, ESRT entries                                         |
 | Secure Boot       | state, setup mode, db/dbx, SBAT, MOK, trust breadth, efivarfs       |
-| Boot chain        | shim signature, SBAT revocations, BootOrder, EFI one-shot boot, ... |
+| Boot chain        | shim signature, SBAT revocations, /boot permissions, BootOrder, ... |
 | ESP               | ownership, filesystem type, fallback boot binary, capsules          |
 | TPM               | TPM 2.0, DA lockout, PCR 0/7, event-log CRTM signal                 |
 | LUKS              | encrypted volumes, LUKS2 version, dm-integrity, TPM2 binding tiers  |
@@ -46,29 +54,45 @@ bythos does not harden. It reads, classifies, prints, exits.
 
 ## Mini example
 
-Plain output is colored in a terminal; `--json` emits the same tree for CI and posture diffs.
+Excerpt of a full run, showing the load-bearing rows. Plain output is colored
+in a terminal; `--json` emits the same tree for CI and posture diffs.
 
 ```text
 $ sudo bythos
   [bythos] firmware trust posture
-    warn:  55 ok  8 warn  0 fail  12 skip
+    summary:  70 ok  1 warn  0 fail  10 skip
 
-    secure boot:
-      ok    state              Secure Boot enabled
-      ok    SBAT policy level  SbatLevel: sbat,1,2024010100
-      warn  trust breadth      Microsoft 3rd Party UEFI CA in db
+  secure boot:
+    ok    state  Secure Boot enabled
+    ok    shim validation  enforced
+    ok    SBAT policy level  SbatLevel: sbat,1,2024010900
+    warn  trust breadth  Microsoft 3rd Party UEFI CA in db; widens trusted signer set
 
-    tpm:
-      ok    PCR 0  non-zero; firmware measured at boot
-      ok    PCR 7  non-zero; Secure Boot state measured
+  boot chain:
+    ok    bootloader SBAT  installed generations satisfy SBAT revocations
+    ok    shim signature  signed; chain not validated
+    ok    /boot file permissions  479 files under /boot, all root-owned and not writable
 
-    platform firmware:
-      ok    Intel BIOS write protection  BLE and SMM_BWP set; BIOS region protected
-      ok    Intel DCI                    DCI disabled and locked
+  esp:
+    ok    default boot fallback  BOOTX64.EFI matches installed shim (sha256)
 
-    fwupd:
-      ok    HSI: Boot Guard               enabled and verified
-      ok    HSI: pre-boot DMA protection  active
+  tpm:
+    ok    PCR 0  non-zero; firmware measured at boot
+    ok    PCR 7  non-zero; Secure Boot state measured
+
+  luks:
+    ok    TPM binding  TPM2 token on 1 device
+    ok    boot chain binding  PCRs: 4 7 9; firmware and full boot chain measured
+
+  platform firmware:
+    ok    Intel BIOS write protection  BLE and SMM_BWP set; BIOS region protected
+    skip  deep audit  requires chipsec
+
+  platform dma:
+    ok    Thunderbolt DMA protection  pre-boot DMA active
+
+  fwupd:
+    ok    HSI: Boot Guard  enabled and verified
 ```
 
 ## Quick Start
@@ -93,6 +117,10 @@ Helpers are spawned via `fork` + `execvp` against a compile-time PATH; their
 output is captured through a bounded pipe with a 10-second timeout and parsed
 by hand-written C parsers.
 
+A helper spawned by bythos runs as root too, so it executes only a binary
+that is root-owned and not group- or world-writable. Anything else is
+refused and reported as `warn`.
+
 PE/COFF parsing extracts `.sbat` from installed shim/grub binaries. JSON
 output escapes control characters and sanitizes invalid UTF-8.
 
@@ -109,9 +137,10 @@ coverage:
 | `tpm2-tools` | TPM PCR reads and dictionary-attack lockout policy |
 | `dmidecode`  | SMBIOS firmware password status                    |
 
-Narrower probes also use `cryptsetup`, `lsblk`, `pesign`, `sha256sum`, and
-`systemctl`. `chipsec` and `spectre-meltdown-checker` are detected for
-availability only. Missing helpers degrade their checks to `skip`, never `fail`.
+Narrower probes also use `cryptsetup`, `lsblk`, `pesign`, `sha256sum`,
+`systemctl`, and `grub-install` / `grub2-install` / `bootctl`. `chipsec` and
+`spectre-meltdown-checker` are detected for availability only. Missing helpers
+degrade their checks to `skip`, never `fail`.
 
 ## Output States
 
@@ -127,8 +156,8 @@ hardware absent, helper missing, field absent, root required, vendor mismatch,
 or output unparseable, among other typed reasons (full list in `man bythos`).
 
 Plain output uses lowercase labels. `--json` capitalizes them (`OK`, `WARN`,
-`FAIL`, `SKIP`) and adds a `skip_reason` field per row. Exit codes are
-listed in the overview at the top.
+`FAIL`, `SKIP`) and adds three fields per row: `skip_reason`, `requires_root`,
+and `actionable`. Exit codes are listed in the overview at the top.
 
 ## Comparison
 
@@ -163,7 +192,7 @@ flagging absent EFI runtime as `warn`.
 ## Limitations
 
 - Pre-OS firmware internals (SMI / SMM / SPI flash) are not exposed by Linux and are invisible to bythos.
-- Versions and posture only - not a CVE scanner.
+- Versions and posture only; not a CVE scanner.
 - Hash comparisons confirm file identity, not Authenticode chain validity.
 - BMC / IPMI / iLO / iDRAC management plane is out of scope.
 - PCR reads are local observations; remote attestation is out of scope.
@@ -187,7 +216,7 @@ and live binary.
 ## Contributing
 
 Found a bug or have a feature request? Open an issue at
-[github.com/q1sh101/bythos](https://github.com/q1sh101/bythos/issues)
+[github.com/q1sh101/bythos/issues](https://github.com/q1sh101/bythos/issues)
 
 Human-written PRs only; LLM-generated submissions are not accepted.
 
