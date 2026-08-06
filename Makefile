@@ -31,9 +31,10 @@ EFI_BOOT_TEST_BIN := tests/efi_boot_parsers
 ESP_TEST_BIN := tests/esp_posture
 SKIP_REASON_TEST_BIN := tests/skip_reason
 FUZZ_TEST_BIN := tests/fuzz_parsers
-TEST_BINS := $(FUZZ_TEST_BIN) $(FIRMWARE_TEST_BIN) $(FIRMWARE_OWNERSHIP_TEST_BIN) $(SILICON_TEST_BIN) $(STORAGE_TEST_BIN) $(RUNTIME_TEST_BIN) $(EFI_BOOT_TEST_BIN) $(ESP_TEST_BIN) $(SKIP_REASON_TEST_BIN)
+JSON_TEST_BIN := tests/json_injection
+TEST_BINS := $(FUZZ_TEST_BIN) $(JSON_TEST_BIN) $(FIRMWARE_TEST_BIN) $(FIRMWARE_OWNERSHIP_TEST_BIN) $(SILICON_TEST_BIN) $(STORAGE_TEST_BIN) $(RUNTIME_TEST_BIN) $(EFI_BOOT_TEST_BIN) $(ESP_TEST_BIN) $(SKIP_REASON_TEST_BIN)
 
-.PHONY: all clean run help-check smoke fuzz-test ci-test test host-test asan install uninstall firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
+.PHONY: all clean run help-check smoke fuzz-test json-test ci-test test host-test asan install uninstall firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
 
 .DELETE_ON_ERROR:
 
@@ -81,7 +82,10 @@ skip-reason-test: $(SKIP_REASON_TEST_BIN)
 fuzz-test: $(FUZZ_TEST_BIN)
 	./$(FUZZ_TEST_BIN)
 
-ci-test: help-check fuzz-test firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
+json-test: $(JSON_TEST_BIN)
+	./$(JSON_TEST_BIN) >/dev/null
+
+ci-test: help-check fuzz-test json-test firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
 
 test: ci-test
 
@@ -124,6 +128,9 @@ $(ESP_TEST_BIN): tests/esp_posture.c src/esp_parsers.c include/esp_parsers.h tes
 
 $(FUZZ_TEST_BIN): tests/fuzz_parsers.c src/efi_boot_parsers.c src/firmware_parsers.c src/esp_parsers.c src/silicon_parsers.c src/storage_parsers.c src/runtime.c tests/assert_helpers.h
 	$(CC) $(TEST_CFLAGS) tests/fuzz_parsers.c src/efi_boot_parsers.c src/firmware_parsers.c src/esp_parsers.c src/silicon_parsers.c src/storage_parsers.c src/runtime.c -o $@ $(LDFLAGS)
+
+$(JSON_TEST_BIN): tests/json_injection.c src/output.c include/output.h include/types.h
+	$(CC) $(TEST_CFLAGS) tests/json_injection.c src/output.c -o $@ $(LDFLAGS)
 
 $(SKIP_REASON_TEST_BIN): tests/skip_reason.c src/output.c include/output.h include/types.h tests/assert_helpers.h
 	$(CC) $(TEST_CFLAGS) tests/skip_reason.c src/output.c -o $@ $(LDFLAGS)

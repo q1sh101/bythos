@@ -9,4 +9,5 @@ tests/efi_boot_parsers
 tests/esp_posture
 tests/skip_reason
 tests/fuzz_parsers
+tests/json_injection
 *.o

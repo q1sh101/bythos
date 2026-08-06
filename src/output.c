@@ -331,12 +331,10 @@ static void bythos_print_plain(
     size_t group_count,
     const posture_summary_t *overall
 ) {
-    static const char *snames[] = {"ok", "warn", "fail", "skip"};
-    check_state_t ost = bythos_summary_state(overall);
     putchar('\n');
     bythos_log("%s", banner);
-    printf("    %s%s:%s  %s%zu ok%s  %s%zu warn%s  %s%zu fail%s  %s%zu skip%s\n\n",
-        c_brand(), (unsigned)ost < 4 ? snames[ost] : "unknown", c_reset(),
+    printf("    %ssummary:%s  %s%zu ok%s  %s%zu warn%s  %s%zu fail%s  %s%zu skip%s\n\n",
+        c_accent(), c_reset(),
         c_green(), overall->ok_count, c_reset(),
         c_yellow(), overall->warn_count, c_reset(),
         c_red(), overall->fail_count, c_reset(),

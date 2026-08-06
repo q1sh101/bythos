@@ -76,8 +76,8 @@ size_t bythos_check_microcode(check_result_t *results, size_t max_results) {
                 EMIT("CPU vulnerabilities", CHECK_WARN, detail);
             } else {
                 char detail[BYTHOS_DETAIL_MAX];
-                snprintf(detail, sizeof(detail), "%zu checks; all mitigated or not affected",
-                    total);
+                snprintf(detail, sizeof(detail), "%zu %s; all mitigated or not affected",
+                    total, bythos_pl(total, "check", "checks"));
                 EMIT("CPU vulnerabilities", CHECK_OK, detail);
             }
         }
@@ -87,7 +87,7 @@ size_t bythos_check_microcode(check_result_t *results, size_t max_results) {
         EMIT_SKIP("CPU vulnerability scan", SKIP_NOT_CONFIGURED,
             "spectre-meltdown-checker available; run manually for a deep scan");
     } else {
-        EMIT_SKIP_TOOL_INSTALL("CPU vulnerability scan", "spectre-meltdown-checker");
+        EMIT_SKIP_TOOL_OR_UNTRUSTED("CPU vulnerability scan", "spectre-meltdown-checker", "spectre-meltdown-checker");
     }
 
     return used;
