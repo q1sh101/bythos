@@ -108,40 +108,58 @@ static char *strip_matching_quotes(char *text) {
     return text;
 }
 
-bool bythos_command_exists(const char *name) {
+typedef enum {
+    PATH_MATCH_NONE = 0,
+    PATH_MATCH_TRUSTED,
+    PATH_MATCH_UNTRUSTED,
+} path_match_t;
+
+static path_match_t resolve_on_trusted_path(const char *name) {
     if (name == NULL || *name == '\0') {
-        return false;
+        return PATH_MATCH_NONE;
     }
 
     char *path_copy = strdup(trusted_path());
     if (path_copy == NULL) {
-        return false;
+        return PATH_MATCH_NONE;
     }
 
-    bool found = false;
+    path_match_t match = PATH_MATCH_NONE;
     char *saveptr = NULL;
-    for (char *dir = strtok_r(path_copy, ":", &saveptr); dir != NULL; dir = strtok_r(NULL, ":", &saveptr)) {
+    for (char *dir = strtok_r(path_copy, ":", &saveptr); dir != NULL;
+         dir = strtok_r(NULL, ":", &saveptr)) {
         char candidate[PATH_MAX];
         if (snprintf(candidate, sizeof(candidate), "%s/%s", dir, name) >= (int)sizeof(candidate)) {
             continue;
         }
-        if (access(candidate, X_OK) == 0) {
+        if (access(candidate, X_OK) != 0) {
+            continue;
+        }
 #ifdef BYTHOS_ALLOW_PATH_OVERRIDE
-            if (getenv("BYTHOS_PATH") != NULL && *getenv("BYTHOS_PATH") != '\0') {
-                found = true;
-                break;
-            }
-#endif
-            /* trust only a root-owned, non-writable first match — execvp runs it as root */
-            struct stat st;
-            found = stat(candidate, &st) == 0 && st.st_uid == 0 &&
-                    (st.st_mode & (mode_t)0022) == 0;
+        const char *override = getenv("BYTHOS_PATH");
+        if (override != NULL && *override != '\0') {
+            match = PATH_MATCH_TRUSTED;
             break;
         }
+#endif
+        /* trust only a root-owned, non-writable first match; execvp runs it as root */
+        struct stat st;
+        bool trusted = stat(candidate, &st) == 0 && st.st_uid == 0 &&
+                       (st.st_mode & (mode_t)0022) == 0;
+        match = trusted ? PATH_MATCH_TRUSTED : PATH_MATCH_UNTRUSTED;
+        break;
     }
 
     free(path_copy);
-    return found;
+    return match;
+}
+
+bool bythos_command_exists(const char *name) {
+    return resolve_on_trusted_path(name) == PATH_MATCH_TRUSTED;
+}
+
+bool bythos_command_untrusted(const char *name) {
+    return resolve_on_trusted_path(name) == PATH_MATCH_UNTRUSTED;
 }
 
 bool bythos_file_exists(const char *path) {
@@ -154,6 +172,14 @@ bool bythos_file_exists(const char *path) {
 }
 
 bool bythos_read_file_text(const char *path, char *buffer, size_t size) {
+    return bythos_read_file_text_ex(path, buffer, size, NULL);
+}
+
+bool bythos_read_file_text_ex(const char *path, char *buffer, size_t size,
+                              bool *truncated) {
+    if (truncated != NULL) {
+        *truncated = false;
+    }
     if (path == NULL || buffer == NULL || size == 0) {
         return false;
     }
@@ -169,12 +195,24 @@ bool bythos_read_file_text(const char *path, char *buffer, size_t size) {
         return false;
     }
 
+    if (truncated != NULL && used == size - 1 && getc(file) != EOF) {
+        *truncated = true;
+    }
+
     buffer[used] = '\0';
     fclose(file);
     return true;
 }
 
 bool bythos_read_file_binary(const char *path, unsigned char *buffer, size_t size, size_t *bytes_read) {
+    return bythos_read_file_binary_ex(path, buffer, size, bytes_read, NULL);
+}
+
+bool bythos_read_file_binary_ex(const char *path, unsigned char *buffer, size_t size,
+                                size_t *bytes_read, bool *truncated) {
+    if (truncated != NULL) {
+        *truncated = false;
+    }
     if (path == NULL || buffer == NULL || size == 0) {
         return false;
     }
@@ -188,6 +226,10 @@ bool bythos_read_file_binary(const char *path, unsigned char *buffer, size_t siz
     if (ferror(file)) {
         fclose(file);
         return false;
+    }
+
+    if (truncated != NULL && n == size && getc(file) != EOF) {
+        *truncated = true;
     }
 
     fclose(file);
@@ -241,13 +283,19 @@ struct dirent *bythos_readdir_safe(DIR *dir, int *err_out) {
     return entry;
 }
 
-bool bythos_find_mount_opts(const char *mounts, const char *fstype,
-                            char *opts_out, size_t opts_size) {
-    if (mounts == NULL || fstype == NULL || opts_out == NULL || opts_size == 0) {
+bool bythos_find_mount_entry(const char *mounts, const char *mount_point,
+                             char *fstype_out, size_t fstype_size,
+                             char *opts_out, size_t opts_size) {
+    if (mounts == NULL || mount_point == NULL || *mount_point == '\0') {
         return false;
     }
 
-    size_t fstype_len = strlen(fstype);
+    size_t point_len = strlen(mount_point);
+    const char *found_fs = NULL;
+    size_t found_fs_len = 0;
+    const char *found_opts = NULL;
+    size_t found_opts_len = 0;
+
     const char *cursor = mounts;
     while (*cursor != '\0') {
         size_t line_len = strcspn(cursor, "\n");
@@ -257,7 +305,9 @@ bool bythos_find_mount_opts(const char *mounts, const char *fstype,
         while (p < line_end && *p != ' ' && *p != '\t') p++;
         while (p < line_end && (*p == ' ' || *p == '\t')) p++;
 
+        const char *point_start = p;
         while (p < line_end && *p != ' ' && *p != '\t') p++;
+        size_t point_field_len = (size_t)(p - point_start);
         while (p < line_end && (*p == ' ' || *p == '\t')) p++;
 
         const char *fs_start = p;
@@ -270,18 +320,36 @@ bool bythos_find_mount_opts(const char *mounts, const char *fstype,
         while (p < line_end && *p != ' ' && *p != '\t') p++;
         size_t opts_len = (size_t)(p - opts_start);
 
-        if (fs_len == fstype_len && memcmp(fs_start, fstype, fs_len) == 0 &&
-            opts_len > 0 && opts_len < opts_size) {
-            memcpy(opts_out, opts_start, opts_len);
-            opts_out[opts_len] = '\0';
-            return true;
+        if (point_field_len == point_len &&
+            memcmp(point_start, mount_point, point_len) == 0) {
+            found_fs = fs_start;
+            found_fs_len = fs_len;
+            found_opts = opts_start;
+            found_opts_len = opts_len;
         }
 
         cursor = line_end;
         while (*cursor == '\n' || *cursor == '\r') cursor++;
     }
 
-    return false;
+    if (found_fs == NULL) {
+        return false;
+    }
+    if (fstype_out != NULL && (found_fs_len == 0 || found_fs_len >= fstype_size)) {
+        return false;
+    }
+    if (opts_out != NULL && (found_opts_len == 0 || found_opts_len >= opts_size)) {
+        return false;
+    }
+    if (fstype_out != NULL) {
+        memcpy(fstype_out, found_fs, found_fs_len);
+        fstype_out[found_fs_len] = '\0';
+    }
+    if (opts_out != NULL) {
+        memcpy(opts_out, found_opts, found_opts_len);
+        opts_out[found_opts_len] = '\0';
+    }
+    return true;
 }
 
 bool bythos_count_child_dirs(const char *path, size_t *count) {

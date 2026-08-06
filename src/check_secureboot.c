@@ -10,6 +10,7 @@
 #include "firmware_parsers.h"
 #include "runtime.h"
 
+#define EFI_EFIVARS_DIR  "/sys/firmware/efi/efivars"
 #define EFI_SIGDB_GUID   "d719b2cb-3d3a-4596-a3bc-dad00e67656f"
 #define EFI_SBAT_GUID    "605dab50-e046-4300-abb6-3dd810dd8b23"
 #define EFI_DB_PATH      "/sys/firmware/efi/efivars/db-"  EFI_SIGDB_GUID
@@ -251,7 +252,8 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
         char opts[256] = {0};
         if (!bythos_read_file_text("/proc/mounts", mounts_buf, sizeof(mounts_buf))) {
             EMIT_SKIP_EXEC("efivarfs mount mode", "proc/mounts");
-        } else if (!bythos_find_mount_opts(mounts_buf, "efivarfs", opts, sizeof(opts))) {
+        } else if (!bythos_find_mount_entry(mounts_buf, EFI_EFIVARS_DIR, NULL, 0,
+                                            opts, sizeof(opts))) {
             EMIT_SKIP_FEATURE("efivarfs mount mode", "efivarfs");
         } else if (strcmp(opts, "ro") == 0 || strncmp(opts, "ro,", 3) == 0) {
             EMIT("efivarfs mount mode", CHECK_OK, "read-only");
