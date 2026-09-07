@@ -141,6 +141,10 @@ JSON is a single firmware-only snapshot. Top-level keys: \fBmode\fR,
 .B NO_COLOR
 When set to a non-empty value, suppresses ANSI color in plain output.
 .TP
+.B FORCE_COLOR, CLICOLOR_FORCE
+When set to a non-empty value, enables ANSI color even when stdout is not a
+terminal. \fBNO_COLOR\fR and a \fBdumb\fR or \fBlinux\fR \fBTERM\fR still win.
+.TP
 .B TERM
 When set to \fBdumb\fR or \fBlinux\fR, ANSI color is suppressed.
 .SH FILES

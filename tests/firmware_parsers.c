@@ -295,6 +295,164 @@ int main(void) {
 
             size_t reported = bythos_hsi_count_not_passing(PASSING_SAMPLE);
             assert_eq_sz("hsi_passing_flag_agrees_with_the_counter", reported, 2);
+
+            bythos_hsi_not_passing_t np;
+            bythos_hsi_collect_not_passing(PASSING_SAMPLE, &np);
+            assert_eq_sz("hsi_collect_total", np.total, 2);
+            assert_eq_sz("hsi_collect_named", np.named, 2);
+            assert_true("hsi_collect_first_id",
+                strcmp(np.id[0], "org.fwupd.hsi.Failing") == 0);
+            assert_true("hsi_collect_second_id",
+                strcmp(np.id[1], "org.fwupd.hsi.NoFlags") == 0);
+        }
+
+        {
+            /* "not-supported" states inapplicability, not a weak posture: such
+               an entry is counted apart and never named. */
+            static const char NOT_SUPPORTED_SAMPLE[] =
+                "{\"SecurityAttributes\":[\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Absent\","
+                "   \"HsiResult\":\"not-supported\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Weak\","
+                "   \"HsiResult\":\"not-locked\",\"Flags\":[\"runtime-issue\"]}\n"
+                "]}\n";
+            bythos_hsi_not_passing_t np;
+
+            bythos_hsi_collect_not_passing(NOT_SUPPORTED_SAMPLE, &np);
+            assert_eq_sz("hsi_ns_total", np.total, 2);
+            assert_eq_sz("hsi_ns_not_supported", np.not_supported, 1);
+            assert_eq_sz("hsi_ns_named", np.named, 1);
+            assert_true("hsi_ns_named_is_the_weak_one",
+                strcmp(np.id[0], "org.fwupd.hsi.Weak") == 0);
+            assert_eq_sz("hsi_ns_counter_still_counts_all",
+                bythos_hsi_count_not_passing(NOT_SUPPORTED_SAMPLE), 2);
+
+            static const char ONLY_NOT_SUPPORTED[] =
+                "{\"SecurityAttributes\":[{\"AppstreamId\":\"org.fwupd.hsi.Absent\","
+                "\"HsiResult\":\"not-supported\",\"Flags\":[]}]}\n";
+            bythos_hsi_collect_not_passing(ONLY_NOT_SUPPORTED, &np);
+            assert_eq_sz("hsi_ns_only_total", np.total, 1);
+            assert_eq_sz("hsi_ns_only_not_supported", np.not_supported, 1);
+            assert_eq_sz("hsi_ns_only_named", np.named, 0);
+
+            /* A passing entry stays out of the observation entirely. */
+            static const char PASSING_NOT_SUPPORTED[] =
+                "{\"SecurityAttributes\":[{\"AppstreamId\":\"org.fwupd.hsi.Absent\","
+                "\"HsiResult\":\"not-supported\",\"Flags\":[\"success\"]}]}\n";
+            bythos_hsi_collect_not_passing(PASSING_NOT_SUPPORTED, &np);
+            assert_eq_sz("hsi_ns_passing_total", np.total, 0);
+            assert_eq_sz("hsi_ns_passing_not_supported", np.not_supported, 0);
+
+            /* Unreadable, absent, near-miss, or neighbouring evidence is never
+               assumed inapplicable. */
+            static const char UNREADABLE_RESULT[] =
+                "{\"SecurityAttributes\":[\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.NoResult\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Unterminated\","
+                "   \"HsiResult\":\"not-supported},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.NearMiss\","
+                "   \"HsiResult\":\"not-supported-yet\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.NoColon\","
+                "   \"HsiResult\"\"not-supported\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Neighbour\","
+                "   \"HsiResult\":\"not-supported\",\"Flags\":[]}\n"
+                "]}\n";
+            bythos_hsi_collect_not_passing(UNREADABLE_RESULT, &np);
+            assert_eq_sz("hsi_ns_unreadable_total", np.total, 5);
+            assert_eq_sz("hsi_ns_unreadable_not_supported", np.not_supported, 1);
+            assert_eq_sz("hsi_ns_unreadable_named", np.named, 4);
+            assert_true("hsi_ns_unreadable_first",
+                strcmp(np.id[0], "org.fwupd.hsi.NoResult") == 0);
+            assert_true("hsi_ns_unreadable_last",
+                strcmp(np.id[3], "org.fwupd.hsi.NoColon") == 0);
+        }
+
+        {
+            /* Every not-passing entry is counted; only an exactly reproducible
+               identifier is named. */
+            char over_long[BYTHOS_HSI_ID_MAX + 8];
+            memset(over_long, 'a', sizeof(over_long) - 1);
+            over_long[sizeof(over_long) - 1] = '\0';
+
+            char sample[2048];
+            int written = snprintf(sample, sizeof(sample),
+                "{\"SecurityAttributes\":[\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Kernel.Swap\","
+                "   \"HsiResult\":\"not-encrypted\",\"Flags\":[\"runtime-issue\"]},\n"
+                "  {\"AppstreamId\"\"HsiResult\":\"borrowed\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"unterminated},\n"
+                "  {\"AppstreamId\":\"%s\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Escaped\\\\\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"org.fwupd\x01hsi.Control\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"org.fwupd\xff\xfe.Utf8\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"\",\"Flags\":[]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.Tail\",\"Flags\":[]}\n"
+                "]}\n", over_long);
+            assert_true("hsi_hostile_sample_built",
+                written > 0 && (size_t)written < sizeof(sample));
+
+            bythos_hsi_not_passing_t np;
+            bythos_hsi_collect_not_passing(sample, &np);
+            assert_eq_sz("hsi_hostile_total", np.total, 9);
+            assert_eq_sz("hsi_hostile_not_supported", np.not_supported, 0);
+            assert_eq_sz("hsi_hostile_named", np.named, 2);
+            assert_true("hsi_hostile_named_head",
+                strcmp(np.id[0], "org.fwupd.hsi.Kernel.Swap") == 0);
+            assert_true("hsi_hostile_named_tail",
+                strcmp(np.id[1], "org.fwupd.hsi.Tail") == 0);
+
+            for (size_t i = 0; i < np.named; i++) {
+                bool printable = true;
+                for (const char *p = np.id[i]; *p != '\0'; p++) {
+                    unsigned char c = (unsigned char)*p;
+                    if (c < 0x20 || c > 0x7e || c == '\\') printable = false;
+                }
+                assert_true("hsi_named_id_is_single_line_ascii", printable);
+            }
+        }
+
+        {
+            /* More not-passing entries than the collector can name: the count
+               stays complete, the remainder is simply unidentified. */
+            char sample[8192];
+            size_t len = 0;
+            const size_t entries = BYTHOS_HSI_NOT_PASSING_MAX_IDS + 8;
+            len += (size_t)snprintf(sample + len, sizeof(sample) - len,
+                                    "{\"SecurityAttributes\":[");
+            for (size_t i = 0; i < entries; i++) {
+                len += (size_t)snprintf(sample + len, sizeof(sample) - len,
+                    "{\"AppstreamId\":\"org.fwupd.hsi.Item%zu\",\"Flags\":[]},", i);
+                assert_true("hsi_many_sample_fits", len < sizeof(sample));
+            }
+            snprintf(sample + len, sizeof(sample) - len, "]}");
+
+            bythos_hsi_not_passing_t np;
+            bythos_hsi_collect_not_passing(sample, &np);
+            assert_eq_sz("hsi_many_total", np.total, entries);
+            assert_eq_sz("hsi_many_named", np.named, BYTHOS_HSI_NOT_PASSING_MAX_IDS);
+            assert_true("hsi_many_last_named",
+                strcmp(np.id[BYTHOS_HSI_NOT_PASSING_MAX_IDS - 1],
+                       "org.fwupd.hsi.Item31") == 0);
+        }
+
+        {
+            static const char ALL_PASSING[] =
+                "{\"SecurityAttributes\":[\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.A\",\"Flags\":[\"success\"]},\n"
+                "  {\"AppstreamId\":\"org.fwupd.hsi.B\",\"Flags\":[\"success\"]}\n"
+                "]}\n";
+            bythos_hsi_not_passing_t np;
+
+            bythos_hsi_collect_not_passing(ALL_PASSING, &np);
+            assert_eq_sz("hsi_all_passing_total", np.total, 0);
+            assert_eq_sz("hsi_all_passing_not_supported", np.not_supported, 0);
+            assert_eq_sz("hsi_all_passing_named", np.named, 0);
+
+            bythos_hsi_collect_not_passing(NULL, &np);
+            assert_eq_sz("hsi_collect_null_json_total", np.total, 0);
+            assert_eq_sz("hsi_collect_null_json_named", np.named, 0);
+            bythos_hsi_collect_not_passing(ALL_PASSING, NULL);
+            assert_eq_sz("hsi_count_null_json", bythos_hsi_count_not_passing(NULL), 0);
         }
 
         assert_false("hsi_attr_absent",

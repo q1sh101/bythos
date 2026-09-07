@@ -56,7 +56,7 @@ static bool append_entry_id(char *list, size_t list_size, uint16_t id) {
 static void display_description(const char *src, char *out, size_t out_size) {
     size_t limit = out_size - 1;
     size_t i = 0;
-    for (; src[i] != '\0' && i < limit; i++) {
+    for (; i < limit && src[i] != '\0'; i++) {
         unsigned char c = (unsigned char)src[i];
         out[i] = (c >= 0x20 && c <= 0x7E) ? (char)c : '?';
     }

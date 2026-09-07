@@ -307,16 +307,49 @@ static bool extract_quoted_value(const char *key_pos, size_t key_len,
     return true;
 }
 
-size_t bythos_hsi_count_not_passing(const char *json) {
+/* a record's evidence is its own value only: no colon, unterminated, or borrowed value yields nothing */
+static bool hsi_value_span(const char *key_pos, size_t key_len, const char *bound,
+                           const char **out_value, size_t *out_len) {
+    const char *p = key_pos + key_len;
+    while (p < bound && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (p >= bound || *p != ':') return false;
+    p++;
+    while (p < bound && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (p >= bound || *p != '"') return false;
+    p++;
+    const char *end = memchr(p, '"', (size_t)(bound - p));
+    if (end == NULL) return false;
+    *out_value = p;
+    *out_len = (size_t)(end - p);
+    return true;
+}
+
+/* fwupd ids are reverse-DNS ASCII; anything else could only print altered, naming an attribute the host never reported */
+static bool hsi_id_reproducible(const char *value, size_t len) {
+    if (len == 0 || len >= BYTHOS_HSI_ID_MAX) return false;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)value[i];
+        if (c < 0x20 || c > 0x7e || c == '\\') return false;
+    }
+    return true;
+}
+
+void bythos_hsi_collect_not_passing(const char *json,
+                                    bythos_hsi_not_passing_t *out) {
     static const char APPSTREAM_ID_KEY[] = "\"AppstreamId\"";
     static const char FLAGS_KEY[]        = "\"Flags\"";
     static const char SUCCESS_TOKEN[]    = "\"success\"";
+    static const char HSI_RESULT_KEY[]   = "\"HsiResult\"";
+    static const char NOT_SUPPORTED[]    = "not-supported";
 
+    if (out == NULL) {
+        return;
+    }
+    *out = (bythos_hsi_not_passing_t){0};
     if (json == NULL) {
-        return 0;
+        return;
     }
 
-    size_t not_passing = 0;
     const char *cursor = json;
     while (*cursor != '\0') {
         const char *id_key = strstr(cursor, APPSTREAM_ID_KEY);
@@ -334,11 +367,42 @@ size_t bythos_hsi_count_not_passing(const char *json) {
             passing = tok != NULL && tok < bound;
         }
         if (!passing) {
-            not_passing++;
+            out->total++;
+
+            /* only an exact "not-supported" result is inapplicable; absent or unreadable evidence stays weak */
+            const char *result = NULL;
+            size_t result_len = 0;
+            const char *result_key = strstr(id_key, HSI_RESULT_KEY);
+            bool not_supported =
+                result_key != NULL && result_key < bound &&
+                hsi_value_span(result_key, sizeof(HSI_RESULT_KEY) - 1, bound,
+                               &result, &result_len) &&
+                result_len == sizeof(NOT_SUPPORTED) - 1 &&
+                memcmp(result, NOT_SUPPORTED, result_len) == 0;
+
+            if (not_supported) {
+                out->not_supported++;
+            } else {
+                const char *value = NULL;
+                size_t value_len = 0;
+                if (out->named < BYTHOS_HSI_NOT_PASSING_MAX_IDS &&
+                    hsi_value_span(id_key, sizeof(APPSTREAM_ID_KEY) - 1, bound,
+                                   &value, &value_len) &&
+                    hsi_id_reproducible(value, value_len)) {
+                    memcpy(out->id[out->named], value, value_len);
+                    out->id[out->named][value_len] = '\0';
+                    out->named++;
+                }
+            }
         }
         cursor = next_id != NULL ? next_id : bound;
     }
-    return not_passing;
+}
+
+size_t bythos_hsi_count_not_passing(const char *json) {
+    bythos_hsi_not_passing_t not_passing;
+    bythos_hsi_collect_not_passing(json, &not_passing);
+    return not_passing.total;
 }
 
 bool bythos_hsi_find_attribute(const char *json, const char *appstream_id,

@@ -45,6 +45,7 @@ static void drive_text(const char *text) {
     char buf[256];
     bythos_sbctl_status_t sbctl;
     bythos_hsi_attribute_t hsi;
+    bythos_hsi_not_passing_t not_passing;
     bythos_iommu_cmdline_t iommu;
     bythos_lsblk_posture_t lsblk;
     bythos_mem_enc_flags_t mem;
@@ -61,6 +62,8 @@ static void drive_text(const char *text) {
     (void)bythos_parse_fwupd_updates(text, 2);
     (void)bythos_parse_sbctl_status(text, &sbctl);
     (void)bythos_hsi_find_attribute(text, "org.fwupd.hsi.Tpm", &hsi);
+    bythos_hsi_collect_not_passing(text, &not_passing);
+    (void)bythos_hsi_count_not_passing(text);
     (void)bythos_sbat_entries_present(text);
     (void)bythos_sb_has_ms_ca(text);
     (void)bythos_parse_sbat_revocation_minimums(text, sbat, BYTHOS_SBAT_MAX_COMPONENTS);
@@ -88,6 +91,12 @@ static const char *const SEEDS[] = {
     "sbat,1,SBAT Version,sbat,1,https://x\nshim,4\ngrub,3\n",
     ("{\"HostSecurityAttributes\":[{\"AppstreamId\":\"org.fwupd.hsi.Tpm\","
      "\"HsiResult\":\"valid\",\"Flags\":[\"success\"]}]}"),
+    ("{\"HostSecurityAttributes\":[{\"AppstreamId\":\"org.fwupd.hsi.Kernel.Swap\","
+     "\"HsiResult\":\"not-encrypted\",\"Flags\":[\"runtime-issue\"]},"
+     "{\"AppstreamId\":\"esc\\\\\",\"Flags\":[]},{\"AppstreamId\"}]}"),
+    ("{\"HostSecurityAttributes\":[{\"AppstreamId\":\"org.fwupd.hsi.Absent\","
+     "\"HsiResult\":\"not-supported\",\"Flags\":[]},"
+     "{\"AppstreamId\":\"org.fwupd.hsi.Cut\",\"HsiResult\":\"not-supported}]}"),
     "NAME TYPE FSTYPE MOUNTPOINT\nsda disk\nsda1 part crypto_LUKS /\n",
     "Version:       \t2\nCipher:  aes-xts-plain64\nintegrity: hmac-sha256\n",
     "cpu family\t: 6\nmicrocode\t: 0xf4\nflags\t\t: fpu sme sev\n",

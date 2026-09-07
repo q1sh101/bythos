@@ -9,6 +9,66 @@
 #include "runtime.h"
 #include "silicon_parsers.h"
 
+/* sized past the EMIT_HSI call sites; a mapping added beyond that stays counted but unrecorded */
+#define HSI_REPORTED_MAX 48
+
+typedef struct {
+    const char *id[HSI_REPORTED_MAX];
+    size_t count;
+    size_t not_supported;
+} hsi_reported_t;
+
+static void hsi_mark_reported(hsi_reported_t *reported, const char *id,
+                              const char *result) {
+    if (reported->count < HSI_REPORTED_MAX) {
+        reported->id[reported->count] = id;
+    }
+    reported->count++;
+    if (strcmp(result, "not-supported") == 0) {
+        reported->not_supported++;
+    }
+}
+
+static bool hsi_already_reported(const hsi_reported_t *reported, const char *id) {
+    size_t n = reported->count < HSI_REPORTED_MAX ? reported->count : HSI_REPORTED_MAX;
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(reported->id[i], id) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool hsi_unmapped_detail(char *out, size_t size, size_t hidden,
+                                const char *names, size_t named,
+                                size_t inapplicable) {
+    char aside[64] = {0};
+    if (inapplicable > 0) {
+        int n = snprintf(aside, sizeof(aside),
+            "; %zu more not-supported (inapplicable)", inapplicable);
+        if (n < 0 || (size_t)n >= sizeof(aside)) {
+            return false;
+        }
+    }
+
+    int written;
+    if (named == 0) {
+        written = snprintf(out, size,
+            "%zu further fwupd %s not passing, unidentified%s; run: fwupdmgr security",
+            hidden, bythos_pl(hidden, "attribute is", "attributes are"), aside);
+    } else if (named == hidden) {
+        written = snprintf(out, size,
+            "%zu further fwupd %s not passing: %s%s; run: fwupdmgr security",
+            hidden, bythos_pl(hidden, "attribute is", "attributes are"), names, aside);
+    } else {
+        written = snprintf(out, size,
+            "%zu further fwupd %s not passing: %s (+%zu unidentified)%s; run: fwupdmgr security",
+            hidden, bythos_pl(hidden, "attribute is", "attributes are"), names,
+            hidden - named, aside);
+    }
+    return written >= 0 && (size_t)written < size;
+}
+
 static void hsi_format_warn(const bythos_hsi_attribute_t *attr,
                             char *out, size_t size) {
     const char *suffix = "";
@@ -203,7 +263,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
                 results[used++] = make_skip((name_), SKIP_FEATURE_ABSENT, "not reported"); \
             } else { \
                 if (!_a.passing) { \
-                    hsi_mapped_not_passing++; \
+                    hsi_mark_reported(&hsi_reported, (id_), _a.result); \
                 } \
                 if (strcmp(_a.result, "not-supported") == 0) { \
                     results[used++] = make_skip((name_), SKIP_FEATURE_ABSENT, "not supported"); \
@@ -219,7 +279,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
         } \
     } while (0)
 
-    size_t hsi_mapped_not_passing = 0;
+    hsi_reported_t hsi_reported = {0};
 
     /* universal */
     EMIT_HSI("HSI: platform fused",
@@ -314,10 +374,12 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
                                "org.fwupd.hsi.IntelBootguard.Verified", &ver_attr);
 
             if (has_en && !en_attr.passing) {
-                hsi_mapped_not_passing++;
+                hsi_mark_reported(&hsi_reported, "org.fwupd.hsi.IntelBootguard.Enabled",
+                                  en_attr.result);
             }
             if (has_ver && !ver_attr.passing) {
-                hsi_mapped_not_passing++;
+                hsi_mark_reported(&hsi_reported, "org.fwupd.hsi.IntelBootguard.Verified",
+                                  ver_attr.result);
             }
 
             if (!has_en) {
@@ -338,18 +400,60 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
     }
 
     {
-        size_t reported = hsi_skip_detail != NULL
-            ? 0
-            : bythos_hsi_count_not_passing(hsi_json);
+        bythos_hsi_not_passing_t not_passing = {0};
+        if (hsi_skip_detail == NULL) {
+            bythos_hsi_collect_not_passing(hsi_json, &not_passing);
+        }
+
+        /* not-supported means inapplicable, not weak; the two readers may disagree on hostile output, so no difference may wrap */
+        size_t weak = not_passing.total - not_passing.not_supported;
+        size_t reported_weak = hsi_reported.count > hsi_reported.not_supported
+            ? hsi_reported.count - hsi_reported.not_supported : 0;
+        size_t inapplicable = not_passing.not_supported > hsi_reported.not_supported
+            ? not_passing.not_supported - hsi_reported.not_supported : 0;
+
         if (hsi_skip_detail != NULL) {
             EMIT_HSI_UNAVAILABLE("HSI: unmapped attributes");
-        } else if (reported > hsi_mapped_not_passing) {
+        } else if (weak > reported_weak) {
+            size_t hidden = weak - reported_weak;
+            size_t named = 0;
+            char names[BYTHOS_DETAIL_MAX] = {0};
             char detail[BYTHOS_DETAIL_MAX];
-            size_t hidden = reported - hsi_mapped_not_passing;
-            snprintf(detail, sizeof(detail),
-                "%zu further fwupd %s not passing; run: fwupdmgr security",
-                hidden, bythos_pl(hidden, "attribute is", "attributes are"));
+
+            (void)hsi_unmapped_detail(detail, sizeof(detail), hidden, names, named,
+                                      inapplicable);
+            /* name at most `hidden` attributes and only whole identifiers, so the row never claims more than it counts */
+            for (size_t i = 0; i < not_passing.named && named < hidden; i++) {
+                char next_names[sizeof(names)];
+                char next_detail[sizeof(detail)];
+
+                if (hsi_already_reported(&hsi_reported, not_passing.id[i])) {
+                    continue;
+                }
+                int written = snprintf(next_names, sizeof(next_names), "%s%s%s",
+                                       names, named == 0 ? "" : ", ",
+                                       not_passing.id[i]);
+                if (written < 0 || (size_t)written >= sizeof(next_names)) {
+                    break;
+                }
+                if (!hsi_unmapped_detail(next_detail, sizeof(next_detail),
+                                         hidden, next_names, named + 1,
+                                         inapplicable)) {
+                    break;
+                }
+                memcpy(names, next_names, (size_t)written + 1);
+                memcpy(detail, next_detail, strlen(next_detail) + 1);
+                named++;
+            }
+
             EMIT("HSI: unmapped attributes", CHECK_WARN, detail);
+        } else if (inapplicable > 0) {
+            char detail[BYTHOS_DETAIL_MAX];
+            snprintf(detail, sizeof(detail),
+                "%zu further fwupd %s not-supported, so inapplicable; "
+                "nothing else not passing is unreported",
+                inapplicable, bythos_pl(inapplicable, "attribute is", "attributes are"));
+            EMIT("HSI: unmapped attributes", CHECK_OK, detail);
         } else {
             EMIT("HSI: unmapped attributes", CHECK_OK,
                  "every fwupd attribute not passing is reported above");

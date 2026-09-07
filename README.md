@@ -246,7 +246,7 @@ and live binary.
 Found a bug or have a feature request? Open an issue at
 [github.com/q1sh101/bythos/issues](https://github.com/q1sh101/bythos/issues)
 
-Human-written PRs only; LLM-generated submissions are not accepted.
+LLM-generated submissions are not accepted.
 
 Built for engineers who care about firmware trust.
 

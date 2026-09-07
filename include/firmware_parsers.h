@@ -53,6 +53,18 @@ typedef struct {
     bool passing;
 } bythos_hsi_attribute_t;
 
+#define BYTHOS_HSI_ID_MAX 96
+#define BYTHOS_HSI_NOT_PASSING_MAX_IDS 32
+
+typedef struct {
+    size_t total;
+    size_t not_supported;
+    size_t named;
+    char id[BYTHOS_HSI_NOT_PASSING_MAX_IDS][BYTHOS_HSI_ID_MAX];
+} bythos_hsi_not_passing_t;
+
+void bythos_hsi_collect_not_passing(const char *json,
+                                    bythos_hsi_not_passing_t *out);
 size_t bythos_hsi_count_not_passing(const char *json);
 bool bythos_hsi_find_attribute(const char *json, const char *appstream_id,
                                    bythos_hsi_attribute_t *out);
