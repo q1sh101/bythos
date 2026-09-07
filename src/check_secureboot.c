@@ -319,7 +319,8 @@ size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
                                             opts, sizeof(opts))) {
             EMIT_SKIP_FEATURE("efivarfs mount mode", "efivarfs");
         } else if (strcmp(opts, "ro") == 0 || strncmp(opts, "ro,", 3) == 0) {
-            EMIT("efivarfs mount mode", CHECK_OK, "read-only");
+            EMIT("efivarfs mount mode", CHECK_OK,
+                "read-only; EFI variable writes are refused while this mount holds");
         } else {
             EMIT("efivarfs mount mode", CHECK_WARN, "read-write; firmware-side variable protection still applies");
         }

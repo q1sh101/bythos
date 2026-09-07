@@ -70,7 +70,7 @@ $ sudo bythos
 
   boot chain:
     ok    bootloader SBAT  installed generations satisfy SBAT revocations
-    ok    shim signature  signed; chain not validated
+    ok    shim signature  booted shim: signed; chain not validated
     ok    /boot file permissions  479 files under /boot, all root-owned and not writable
 
   esp:
@@ -82,7 +82,7 @@ $ sudo bythos
 
   luks:
     ok    TPM binding  TPM2 token on 1 device
-    ok    boot chain binding  PCRs: 4 7 9; boot chain measured
+    ok    boot chain binding  PCRs: 4 7 9; boot chain measured; unlock breaks on bootloader, Secure Boot key, or kernel/initramfs update
 
   platform firmware:
     ok    Intel BIOS write protection  BLE and SMM_BWP set; BIOS region protected
@@ -141,9 +141,13 @@ Helpers are spawned via `fork` + `execvp` against a compile-time PATH; their
 output is captured through a bounded pipe with a 10-second timeout and parsed
 by hand-written C parsers.
 
-A helper spawned by bythos runs as root too, so it executes only a binary
-that is root-owned and not group- or world-writable. Anything else is
-refused and reported as `warn`.
+Because a helper spawned by bythos runs as root too, bythos verifies it first:
+the binary the compile-time PATH resolves to must be root-owned and not group-
+or world-writable, or the helper is refused rather than executed and its checks
+report `warn`. The spawn resolves the name again, so this is a check made
+before execution, not a guarantee about the file that finally runs; that gap is
+narrow only where the searched directories are themselves writable by root
+alone, and bythos verifies the binary, not the directories.
 
 PE/COFF parsing extracts `.sbat` from installed shim/grub binaries. JSON
 output escapes control characters and sanitizes invalid UTF-8.

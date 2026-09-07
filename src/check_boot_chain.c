@@ -121,7 +121,8 @@ static bool find_efi_binary(const char *const *candidates, size_t candidate_coun
 #define EFI_GLOBAL_VAR_GUID "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
 typedef enum {
-    SHIM_RESOLUTION_FOUND = 0,
+    SHIM_RESOLUTION_FOUND_BOOTED = 0,
+    SHIM_RESOLUTION_FOUND_ON_ESP,
     SHIM_RESOLUTION_FALLBACK_ALLOWED,
     SHIM_RESOLUTION_BOOTED_NON_SHIM,
     SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED,
@@ -186,14 +187,14 @@ static shim_resolution_t find_booted_shim(char *path_out, size_t path_out_size) 
                  bythos_esp_efi_base(), norm + rel_off) >= (int)path_out_size) {
         return SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
     }
-    return bythos_file_exists(path_out) ? SHIM_RESOLUTION_FOUND :
+    return bythos_file_exists(path_out) ? SHIM_RESOLUTION_FOUND_BOOTED :
         SHIM_RESOLUTION_BOOTCURRENT_UNRESOLVED;
 }
 
 static bool find_shim(char *path_out, size_t path_out_size,
                       shim_resolution_t *resolution_out) {
     shim_resolution_t resolution = find_booted_shim(path_out, path_out_size);
-    if (resolution == SHIM_RESOLUTION_FOUND) {
+    if (resolution == SHIM_RESOLUTION_FOUND_BOOTED) {
         if (resolution_out != NULL) {
             *resolution_out = resolution;
         }
@@ -210,7 +211,7 @@ static bool find_shim(char *path_out, size_t path_out_size,
                                  sizeof(candidates) / sizeof(candidates[0]),
                                  path_out, path_out_size);
     if (resolution_out != NULL) {
-        *resolution_out = found ? SHIM_RESOLUTION_FOUND :
+        *resolution_out = found ? SHIM_RESOLUTION_FOUND_ON_ESP :
             SHIM_RESOLUTION_FALLBACK_ALLOWED;
     }
     return found;
@@ -262,12 +263,18 @@ static size_t check_shim_signature(check_result_t *results, size_t max_results) 
     char lower[2048];
     bythos_to_lower_ascii(buf, lower, sizeof(lower));
 
+    /* both routes yield a verdict, but only one describes the binary this host actually booted */
+    const char *subject = shim_resolution == SHIM_RESOLUTION_FOUND_ON_ESP
+        ? "shim on ESP, not confirmed booted (BootCurrent unreadable)"
+        : "booted shim";
+    char detail[BYTHOS_DETAIL_MAX];
+
     if (buf[0] == '\0' || strstr(lower, "no signature") != NULL) {
-        results[used++] = make_result("shim signature", CHECK_FAIL,
-            "binary not signed");
+        snprintf(detail, sizeof(detail), "%s: binary not signed", subject);
+        results[used++] = make_result("shim signature", CHECK_FAIL, detail);
     } else {
-        results[used++] = make_result("shim signature", CHECK_OK,
-            "signed; chain not validated");
+        snprintf(detail, sizeof(detail), "%s: signed; chain not validated", subject);
+        results[used++] = make_result("shim signature", CHECK_OK, detail);
     }
     return used;
 }
@@ -353,8 +360,13 @@ static size_t check_boot_permissions(check_result_t *results, size_t max_results
         char mounts[65536] = {0};
         char fstype[64] = {0};
         bool mounts_truncated = false;
-        if (bythos_read_file_text_ex("/proc/mounts", mounts, sizeof(mounts),
-                                     &mounts_truncated) && mounts_truncated) {
+        /* without the mount table, /boot may be FAT, whose files carry no ownership to judge */
+        if (!bythos_read_file_text_ex("/proc/mounts", mounts, sizeof(mounts),
+                                      &mounts_truncated)) {
+            EMIT_SKIP_EXEC("/boot file permissions", "/proc/mounts");
+            return used;
+        }
+        if (mounts_truncated) {
             EMIT_SKIP("/boot file permissions", SKIP_PROBE_INDETERMINATE,
                 "mount table larger than this tool reads");
             return used;

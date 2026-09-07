@@ -23,6 +23,81 @@ static void pcr_mask_to_str(uint32_t mask, char *out, size_t size) {
     if (pos == 0 && size > 0) out[0] = '\0';
 }
 
+static const struct {
+    unsigned int pcr;
+    const char *update;
+} PCR_UPDATE_KINDS[] = {
+    {0,  "firmware"},
+    {4,  "bootloader"},
+    {7,  "Secure Boot key"},
+    {9,  "kernel/initramfs"},
+    {11, "UKI"},
+};
+
+/* append whole or not at all: half a clause would claim consequences the mask does not carry */
+static bool append_clause(char *detail, size_t size, const char *clause) {
+    size_t len = strlen(detail);
+    if (len >= size) return false;
+
+    int written = snprintf(detail + len, size - len, "; %s", clause);
+    if (written < 0 || (size_t)written >= size - len) {
+        detail[len] = '\0';
+        return false;
+    }
+    return true;
+}
+
+static void append_unlock_consequences(char *detail, size_t size,
+                                       uint32_t mask, bool signed_policy) {
+    const char *qualifier = signed_policy ? " without a fresh signed policy" : "";
+    const char *names[sizeof(PCR_UPDATE_KINDS) / sizeof(PCR_UPDATE_KINDS[0])];
+    size_t count = 0;
+    uint32_t known = 0;
+    char list[128];
+    char clause[BYTHOS_DETAIL_MAX];
+    size_t pos = 0;
+    bool complete = true;
+
+    for (size_t i = 0; i < sizeof(PCR_UPDATE_KINDS) / sizeof(PCR_UPDATE_KINDS[0]); i++) {
+        if ((mask & PCR_BIT(PCR_UPDATE_KINDS[i].pcr)) != 0) {
+            known |= PCR_BIT(PCR_UPDATE_KINDS[i].pcr);
+            names[count++] = PCR_UPDATE_KINDS[i].update;
+        }
+    }
+
+    if (count == 0) {
+        (void)append_clause(detail, size, "no bound PCR has a known update consequence");
+        return;
+    }
+
+    list[0] = '\0';
+    for (size_t i = 0; i < count; i++) {
+        const char *sep = i == 0        ? ""
+                        : i + 1 < count ? ", "
+                        : count == 2    ? " or "
+                                        : ", or ";
+        int written = snprintf(list + pos, sizeof(list) - pos, "%s%s", sep, names[i]);
+        if (written < 0 || (size_t)written >= sizeof(list) - pos) {
+            complete = false;
+            break;
+        }
+        pos += (size_t)written;
+    }
+
+    if (complete) {
+        int written = snprintf(clause, sizeof(clause), "unlock breaks on %s update%s%s",
+            list, qualifier,
+            (mask & ~known) != 0 ? "; consequence of other bound PCRs unknown" : "");
+        complete = written >= 0 && (size_t)written < sizeof(clause);
+    }
+    if (complete && append_clause(detail, size, clause)) {
+        return;
+    }
+
+    snprintf(clause, sizeof(clause), "any change to a bound PCR breaks unlock%s", qualifier);
+    (void)append_clause(detail, size, clause);
+}
+
 size_t bythos_check_luks(check_result_t *results, size_t max_results) {
     size_t used = 0;
     static const char *const lsblk_argv[] = {"lsblk", "-P", "-o", "NAME,TYPE,FSTYPE", NULL};
@@ -317,18 +392,24 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
                     } else if (weakest_mask == 0xFFFFFFFFu || weakest_mask == 0) {
                         if (signed_policy_count > 0) {
                             char pcr_str[64] = {0};
+                            check_state_t chain_state = CHECK_OK;
                             pcr_mask_to_str(signed_weakest_mask, pcr_str, sizeof(pcr_str));
                             snprintf(detail, sizeof(detail),
                                 "signed policy (pubkey); PCRs: %s", pcr_str);
+                            append_unlock_consequences(detail, sizeof(detail),
+                                signed_weakest_mask, true);
                             EMIT("LUKS Secure Boot binding", CHECK_OK, detail);
                             if ((signed_weakest_mask & PCR_BIT(11)) != 0) {
-                                EMIT("LUKS boot chain binding", CHECK_OK,
+                                snprintf(detail, sizeof(detail),
                                     "signed policy; PCR 11 (UKI) measured");
                             } else {
                                 snprintf(detail, sizeof(detail),
                                     "signed policy; PCRs: %s, PCR 11 (UKI) absent", pcr_str);
-                                EMIT("LUKS boot chain binding", CHECK_WARN, detail);
+                                chain_state = CHECK_WARN;
                             }
+                            append_unlock_consequences(detail, sizeof(detail),
+                                signed_weakest_mask, true);
+                            EMIT("LUKS boot chain binding", chain_state, detail);
                         } else {
                             EMIT_SKIP("LUKS Secure Boot binding", SKIP_OUTPUT_UNPARSEABLE, "PCR mask unreadable");
                             EMIT_SKIP("LUKS boot chain binding", SKIP_OUTPUT_UNPARSEABLE, "PCR mask unreadable");
@@ -341,49 +422,50 @@ size_t bythos_check_luks(check_result_t *results, size_t max_results) {
                         char pcr_str[64] = {0};
                         pcr_mask_to_str(weakest_mask, pcr_str, sizeof(pcr_str));
 
+                        check_state_t sb_state = CHECK_WARN;
+                        check_state_t chain_state = CHECK_WARN;
+
                         if (!has7) {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s; PCR 7 absent, Secure Boot state unmeasured", pcr_str);
-                            EMIT("LUKS Secure Boot binding", CHECK_WARN, detail);
                         } else if (luks_token_noparsed > 0) {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s; %zu %s PCR binding unreadable",
                                 pcr_str, luks_token_noparsed,
                                 bythos_pl(luks_token_noparsed, "device", "devices"));
-                            EMIT("LUKS Secure Boot binding", CHECK_WARN, detail);
                         } else {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s; Secure Boot state measured", pcr_str);
-                            EMIT("LUKS Secure Boot binding", CHECK_OK, detail);
+                            sb_state = CHECK_OK;
                         }
+                        append_unlock_consequences(detail, sizeof(detail), weakest_mask, false);
+                        EMIT("LUKS Secure Boot binding", sb_state, detail);
 
                         if (!has4 && !has9) {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s only; bootloader and initramfs unprotected", pcr_str);
-                            EMIT("LUKS boot chain binding", CHECK_WARN, detail);
                         } else if (!has4) {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s; bootloader (PCR 4) unmeasured", pcr_str);
-                            EMIT("LUKS boot chain binding", CHECK_WARN, detail);
                         } else if (!has9) {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s; initramfs unprotected", pcr_str);
-                            EMIT("LUKS boot chain binding", CHECK_WARN, detail);
                         } else if (luks_token_noparsed > 0) {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s; %zu %s PCR binding unreadable",
                                 pcr_str, luks_token_noparsed,
                                 bythos_pl(luks_token_noparsed, "device", "devices"));
-                            EMIT("LUKS boot chain binding", CHECK_WARN, detail);
                         } else if (has0) {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s; firmware and full boot chain measured", pcr_str);
-                            EMIT("LUKS boot chain binding", CHECK_OK, detail);
+                            chain_state = CHECK_OK;
                         } else {
                             snprintf(detail, sizeof(detail),
                                 "PCRs: %s; boot chain measured", pcr_str);
-                            EMIT("LUKS boot chain binding", CHECK_OK, detail);
+                            chain_state = CHECK_OK;
                         }
+                        append_unlock_consequences(detail, sizeof(detail), weakest_mask, false);
+                        EMIT("LUKS boot chain binding", chain_state, detail);
                     }
                 }
             }

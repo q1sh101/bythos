@@ -242,6 +242,12 @@ static size_t check_bootx64(check_result_t *results, size_t max_results) {
     }
 
     if (!bythos_command_exists("sha256sum") && used < max_results) {
+        /* A helper refused for its ownership is present, not missing. */
+        if (bythos_command_untrusted("sha256sum")) {
+            results[used++] = make_result("default boot fallback", CHECK_WARN,
+                "sha256sum on PATH is not root-owned; refusing to run it as root");
+            return used;
+        }
         char detail[BYTHOS_DETAIL_MAX];
         snprintf(detail, sizeof(detail), "%s present; sha256sum unavailable for identity check",
                  fallback_filename);
