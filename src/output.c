@@ -9,13 +9,18 @@
 
 #include "output.h"
 
+static bool env_set(const char *name) {
+    const char *value = getenv(name);
+    return value != NULL && *value != '\0';
+}
+
 static bool use_color(void) {
     static int cached = -1;
     if (cached < 0) {
-        const char *no_color = getenv("NO_COLOR");
         const char *term = getenv("TERM");
-        cached = (no_color == NULL || *no_color == '\0')
-                 && isatty(fileno(stdout)) != 0
+        bool forced = env_set("CLICOLOR_FORCE") || env_set("FORCE_COLOR");
+        cached = !env_set("NO_COLOR")
+                 && (forced || isatty(fileno(stdout)) != 0)
                  && term != NULL
                  && strcmp(term, "dumb") != 0
                  && strcmp(term, "linux") != 0;
@@ -51,7 +56,7 @@ static void vprint_prefixed(FILE *stream, const char *color, const char *label, 
     fputc('\n', stream);
 }
 
-static void bythos_log(const char *fmt, ...) {
+static void print_brand_line(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     vprint_prefixed(stdout, c_brand(), "[bythos]", fmt, args);
@@ -127,8 +132,8 @@ static void print_result_line(const char *display_name, const check_result_t *re
     fputc('\n', stdout);
 }
 
-static void bythos_print_result_in_subgroup(const check_result_t *result,
-                                             const char *subgroup_name) {
+static void print_result_in_subgroup(const check_result_t *result,
+                                     const char *subgroup_name) {
     print_result_line(strip_subgroup_prefix(result->name, subgroup_name), result);
 }
 
@@ -242,7 +247,7 @@ static const char *exit_meaning(int exit_code) {
     }
 }
 
-static void bythos_print_json(
+static void print_json(
     const char *mode,
     const char *banner,
     const bythos_group_view_t *groups,
@@ -314,7 +319,7 @@ static void print_groups_hierarchy(
             if (sg->result_count == 0) continue;
             printf("  %s%s:%s\n", c_accent(), sg->name, c_reset());
             for (size_t i = 0; i < sg->result_count; i++) {
-                bythos_print_result_in_subgroup(&sg->results[i], sg->name);
+                print_result_in_subgroup(&sg->results[i], sg->name);
             }
             if (sg->truncated) {
                 printf("    %s(some results truncated; subgroup at capacity)%s\n",
@@ -325,14 +330,14 @@ static void print_groups_hierarchy(
     }
 }
 
-static void bythos_print_plain(
+static void print_plain(
     const char *banner,
     const bythos_group_view_t *groups,
     size_t group_count,
     const posture_summary_t *overall
 ) {
     putchar('\n');
-    bythos_log("%s", banner);
+    print_brand_line("%s", banner);
     printf("    %ssummary:%s  %s%zu ok%s  %s%zu warn%s  %s%zu fail%s  %s%zu skip%s\n\n",
         c_accent(), c_reset(),
         c_green(), overall->ok_count, c_reset(),
@@ -352,8 +357,8 @@ void bythos_render(
     int exit_code
 ) {
     if (mode == BYTHOS_RENDER_JSON) {
-        bythos_print_json(mode_str, banner, groups, group_count, overall, exit_code);
+        print_json(mode_str, banner, groups, group_count, overall, exit_code);
     } else {
-        bythos_print_plain(banner, groups, group_count, overall);
+        print_plain(banner, groups, group_count, overall);
     }
 }

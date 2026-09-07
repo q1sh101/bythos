@@ -19,7 +19,7 @@
 #define BYTHOS_CMD_TIMEOUT_SEC 10
 #define BYTHOS_DEFAULT_PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-static volatile sig_atomic_t bythos_alarm_fired = 0;
+static volatile sig_atomic_t alarm_fired = 0;
 
 static const char *trusted_path(void) {
 #ifdef BYTHOS_ALLOW_PATH_OVERRIDE
@@ -31,9 +31,9 @@ static const char *trusted_path(void) {
     return BYTHOS_DEFAULT_PATH;
 }
 
-static void bythos_on_alarm(int sig) {
+static void on_alarm(int sig) {
     (void)sig;
-    bythos_alarm_fired = 1;
+    alarm_fired = 1;
 }
 
 void bythos_to_lower_ascii(const char *src, char *dst, size_t dst_size) {
@@ -142,7 +142,7 @@ static path_match_t resolve_on_trusted_path(const char *name) {
             break;
         }
 #endif
-        /* trust only a root-owned, non-writable first match; execvp runs it as root */
+        /* root-owned, non-writable first match only; execvp re-resolves, so this checks before exec, not the file run */
         struct stat st;
         bool trusted = stat(candidate, &st) == 0 && st.st_uid == 0 &&
                        (st.st_mode & (mode_t)0022) == 0;
@@ -486,17 +486,17 @@ bool bythos_capture_argv_status_ex(const char *const argv[], char *buffer, size_
 
     struct sigaction sa = {0};
     struct sigaction old_sa;
-    sa.sa_handler = bythos_on_alarm;
+    sa.sa_handler = on_alarm;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGALRM, &sa, &old_sa);
-    bythos_alarm_fired = 0;
+    alarm_fired = 0;
     alarm(BYTHOS_CMD_TIMEOUT_SEC);
 
     buffer[0] = '\0';
     size_t used = 0;
     char chunk[512];
     ssize_t count;
-    while (!bythos_alarm_fired && (count = read(pipefd[0], chunk, sizeof(chunk))) > 0) {
+    while (!alarm_fired && (count = read(pipefd[0], chunk, sizeof(chunk))) > 0) {
         if (used + 1 < size) {
             size_t to_copy = (size_t)count;
             size_t remaining = size - used - 1;
@@ -514,7 +514,7 @@ bool bythos_capture_argv_status_ex(const char *const argv[], char *buffer, size_
         }
     }
 
-    bool timed_out = bythos_alarm_fired;
+    bool timed_out = alarm_fired;
     alarm(0);
     sigaction(SIGALRM, &old_sa, NULL);
 

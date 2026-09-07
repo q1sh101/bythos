@@ -1,9 +1,9 @@
 #ifndef BYTHOS_RUNTIME_H
 #define BYTHOS_RUNTIME_H
 
+#include <dirent.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <dirent.h>
 
 typedef enum {
     BYTHOS_SERVICE_STATE_UNKNOWN = 0,

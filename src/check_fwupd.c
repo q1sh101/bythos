@@ -35,8 +35,8 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
         }
     }
     bool has_fwupdmgr = false;
-    static const char *fwupd_devices_argv[] = {"fwupdmgr", "get-devices", NULL};
-    static const char *fwupd_updates_argv[] = {"fwupdmgr", "get-updates", NULL};
+    static const char *const fwupd_devices_argv[] = {"fwupdmgr", "get-devices", NULL};
+    static const char *const fwupd_updates_argv[] = {"fwupdmgr", "get-updates", NULL};
 
     has_fwupdmgr = bythos_command_exists("fwupdmgr");
 
@@ -121,7 +121,7 @@ size_t bythos_check_fwupd(check_result_t *results, size_t max_results) {
 
     /* Firmware update history - informational signal, not a hard posture gate. */
     {
-        static const char *fwupd_history_argv[] = {"fwupdmgr", "get-history", NULL};
+        static const char *const fwupd_history_argv[] = {"fwupdmgr", "get-history", NULL};
         char hist_buffer[2048] = {0};
         int hist_status = -1;
 

@@ -76,7 +76,7 @@ static void check_sigdb_variable(const char *path, const char *name,
 size_t bythos_check_secureboot(check_result_t *results, size_t max_results) {
     size_t used = 0;
     bool has_mokutil = false;
-    static const char *mokutil_state_argv[] = {"mokutil", "--sb-state", NULL};
+    static const char *const mokutil_state_argv[] = {"mokutil", "--sb-state", NULL};
     char state_buffer[512] = {0};
     bool have_state_output = false;
     bythos_mok_ownership_t ownership = {0};
