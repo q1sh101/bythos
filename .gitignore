@@ -6,6 +6,7 @@ tests/storage_parsers
 tests/firmware_parsers
 tests/firmware_ownership
 tests/efi_boot_parsers
+tests/bios_boot
 tests/esp_posture
 tests/skip_reason
 tests/fuzz_parsers

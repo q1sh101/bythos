@@ -28,13 +28,14 @@ SILICON_TEST_BIN := tests/silicon_parsers
 STORAGE_TEST_BIN := tests/storage_parsers
 RUNTIME_TEST_BIN := tests/runtime_capture
 EFI_BOOT_TEST_BIN := tests/efi_boot_parsers
+BIOS_BOOT_TEST_BIN := tests/bios_boot
 ESP_TEST_BIN := tests/esp_posture
 SKIP_REASON_TEST_BIN := tests/skip_reason
 FUZZ_TEST_BIN := tests/fuzz_parsers
 JSON_TEST_BIN := tests/json_injection
-TEST_BINS := $(FUZZ_TEST_BIN) $(JSON_TEST_BIN) $(FIRMWARE_TEST_BIN) $(FIRMWARE_OWNERSHIP_TEST_BIN) $(SILICON_TEST_BIN) $(STORAGE_TEST_BIN) $(RUNTIME_TEST_BIN) $(EFI_BOOT_TEST_BIN) $(ESP_TEST_BIN) $(SKIP_REASON_TEST_BIN)
+TEST_BINS := $(FUZZ_TEST_BIN) $(JSON_TEST_BIN) $(FIRMWARE_TEST_BIN) $(FIRMWARE_OWNERSHIP_TEST_BIN) $(SILICON_TEST_BIN) $(STORAGE_TEST_BIN) $(RUNTIME_TEST_BIN) $(EFI_BOOT_TEST_BIN) $(BIOS_BOOT_TEST_BIN) $(ESP_TEST_BIN) $(SKIP_REASON_TEST_BIN)
 
-.PHONY: all clean run help-check smoke fuzz-test json-test ci-test test host-test asan install uninstall firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
+.PHONY: all clean run help-check smoke fuzz-test json-test ci-test test host-test asan install uninstall firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test bios-boot-test esp-test skip-reason-test
 
 .DELETE_ON_ERROR:
 
@@ -73,6 +74,9 @@ runtime-test: $(RUNTIME_TEST_BIN)
 efi-boot-test: $(EFI_BOOT_TEST_BIN)
 	./$(EFI_BOOT_TEST_BIN)
 
+bios-boot-test: $(BIOS_BOOT_TEST_BIN)
+	./$(BIOS_BOOT_TEST_BIN)
+
 esp-test: $(ESP_TEST_BIN)
 	./$(ESP_TEST_BIN)
 
@@ -85,7 +89,7 @@ fuzz-test: $(FUZZ_TEST_BIN)
 json-test: $(JSON_TEST_BIN)
 	./$(JSON_TEST_BIN) >/dev/null
 
-ci-test: help-check fuzz-test json-test firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test esp-test skip-reason-test
+ci-test: help-check fuzz-test json-test firmware-test firmware-ownership-test silicon-test storage-test runtime-test efi-boot-test bios-boot-test esp-test skip-reason-test
 
 test: ci-test
 
@@ -122,6 +126,9 @@ $(RUNTIME_TEST_BIN): tests/runtime_capture.c src/runtime.c include/runtime.h tes
 
 $(EFI_BOOT_TEST_BIN): tests/efi_boot_parsers.c src/efi_boot_parsers.c src/runtime.c include/efi_boot_parsers.h include/runtime.h tests/assert_helpers.h
 	$(CC) $(TEST_CFLAGS) tests/efi_boot_parsers.c src/efi_boot_parsers.c src/runtime.c -o $@ $(LDFLAGS)
+
+$(BIOS_BOOT_TEST_BIN): tests/bios_boot.c src/check_bios_boot.c src/efi_boot_parsers.c include/checks_internal.h include/efi_boot_parsers.h include/runtime.h include/types.h tests/assert_helpers.h
+	$(CC) $(TEST_CFLAGS) tests/bios_boot.c src/check_bios_boot.c src/efi_boot_parsers.c -o $@ $(LDFLAGS)
 
 $(ESP_TEST_BIN): tests/esp_posture.c src/esp_parsers.c include/esp_parsers.h tests/assert_helpers.h
 	$(CC) $(TEST_CFLAGS) tests/esp_posture.c src/esp_parsers.c -o $@ $(LDFLAGS)

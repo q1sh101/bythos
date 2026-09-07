@@ -50,6 +50,94 @@ static bool append_entry_id(char *list, size_t list_size, uint16_t id) {
     return true;
 }
 
+/* firmware-controlled text reaches the row unescaped: keep printable ASCII only, mark truncation */
+#define BOOT_DESC_DISPLAY_MAX 40
+
+static void display_description(const char *src, char *out, size_t out_size) {
+    size_t limit = out_size - 1;
+    size_t i = 0;
+    for (; src[i] != '\0' && i < limit; i++) {
+        unsigned char c = (unsigned char)src[i];
+        out[i] = (c >= 0x20 && c <= 0x7E) ? (char)c : '?';
+    }
+    out[i] = '\0';
+    if (src[i] != '\0' && limit >= 3) {
+        memcpy(out + limit - 3, "...", 4);
+    }
+}
+
+static bool append_unclassified_entry(char *list, size_t list_size, uint16_t id,
+                                      const char *description) {
+    char desc[BOOT_DESC_DISPLAY_MAX];
+    display_description(description, desc, sizeof(desc));
+
+    size_t used = strlen(list);
+    const char *separator = used > 0 ? " " : "";
+    char item[24 + sizeof(desc)];
+    int written = desc[0] != '\0'
+        ? snprintf(item, sizeof(item), "%sBoot%04X \"%s\"", separator, id, desc)
+        : snprintf(item, sizeof(item), "%sBoot%04X", separator, id);
+    if (written < 0 || (size_t)written >= sizeof(item)) {
+        return false;
+    }
+    if (used + (size_t)written >= list_size) {
+        return false;
+    }
+    memcpy(list + used, item, (size_t)written + 1);
+    return true;
+}
+
+static void append_text(char *out, size_t size, size_t *pos, const char *text) {
+    if (*pos >= size) {
+        return;
+    }
+    int written = snprintf(out + *pos, size - *pos, "%s", text);
+    if (written < 0) {
+        return;
+    }
+    *pos = ((size_t)written >= size - *pos) ? size - 1 : *pos + (size_t)written;
+}
+
+/* a cause list cut mid-claim would misstate what blocked the walk; fall back to the medium alone */
+static void compose_blocked_detail(char *detail, size_t size, const char *blocked,
+                                   const char *medium) {
+    int written = snprintf(detail, size, "%s; %s presence unconfirmed", blocked, medium);
+    if (written < 0 || (size_t)written >= size) {
+        snprintf(detail, size, "boot order not fully inspected; %s presence unconfirmed",
+                 medium);
+    }
+}
+
+static void describe_incomplete_order(char *out, size_t size,
+                                      const char *unreadable_entries, bool unreadable_all,
+                                      const char *unclassified_entries, bool unclassified_all,
+                                      bool capped) {
+    size_t pos = 0;
+    out[0] = '\0';
+    append_text(out, size, &pos, "boot order not fully inspected");
+
+    if (unreadable_entries[0] != '\0') {
+        append_text(out, size, &pos, "; unreadable: ");
+        append_text(out, size, &pos, unreadable_entries);
+        if (!unreadable_all) {
+            append_text(out, size, &pos, " and more");
+        }
+    }
+    if (unclassified_entries[0] != '\0') {
+        append_text(out, size, &pos, "; unclassified: ");
+        append_text(out, size, &pos, unclassified_entries);
+        if (!unclassified_all) {
+            append_text(out, size, &pos, " and more");
+        }
+    }
+    if (capped) {
+        char shortened[48];
+        snprintf(shortened, sizeof(shortened), "; list shortened at %d entries",
+                 BYTHOS_EFI_BOOT_MAX_ENTRIES);
+        append_text(out, size, &pos, shortened);
+    }
+}
+
 static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
     size_t used = 0;
 
@@ -94,12 +182,21 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
     bool cd_all_listed = true;
     size_t unreadable = 0;
     size_t unclassified = 0;
+    /* sized so both lists, "and more", the shortened clause and the medium clause fit one detail */
+    char unreadable_entries[41] = {0};
+    char unclassified_entries[64] = {0};
+    bool unreadable_all_listed = true;
+    bool unclassified_all_listed = true;
     bool order_capped = order.truncated;
 
     for (size_t i = 0; i < order.order_count; i++) {
         bythos_efi_boot_entry_t entry = {0};
         if (!read_boot_entry(order.order[i], &entry)) {
             unreadable++;
+            if (!append_entry_id(unreadable_entries, sizeof(unreadable_entries),
+                                 order.order[i])) {
+                unreadable_all_listed = false;
+            }
             continue;
         }
 
@@ -128,10 +225,23 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
                 break;
             case BYTHOS_EFI_BOOT_TYPE_UNKNOWN:
                 unclassified++;
+                if (!append_unclassified_entry(unclassified_entries,
+                                               sizeof(unclassified_entries),
+                                               order.order[i], entry.description)) {
+                    unclassified_all_listed = false;
+                }
                 break;
             default:
                 break;
         }
+    }
+
+    char blocked[BYTHOS_DETAIL_MAX] = {0};
+    if (unreadable > 0 || order_capped || unclassified > 0) {
+        describe_incomplete_order(blocked, sizeof(blocked),
+                                  unreadable_entries, unreadable_all_listed,
+                                  unclassified_entries, unclassified_all_listed,
+                                  order_capped);
     }
 
     if (usb_in_order) {
@@ -139,8 +249,10 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
         snprintf(detail, sizeof(detail), "active in EFI boot order: %s%s",
                  usb_entries, usb_all_listed ? "" : " and more");
         EMIT("EFI USB boot", CHECK_WARN, detail);
-    } else if (unreadable > 0 || order_capped || unclassified > 0) {
-        EMIT_SKIP("EFI USB boot", SKIP_OUTPUT_UNPARSEABLE, "boot order not fully inspected; USB presence unconfirmed");
+    } else if (blocked[0] != '\0') {
+        char detail[BYTHOS_DETAIL_MAX];
+        compose_blocked_detail(detail, sizeof(detail), blocked, "USB");
+        EMIT_SKIP("EFI USB boot", SKIP_OUTPUT_UNPARSEABLE, detail);
     } else {
         EMIT("EFI USB boot", CHECK_OK, "no active entry in EFI boot order");
     }
@@ -150,8 +262,10 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
         snprintf(detail, sizeof(detail), "active in EFI boot order: %s%s",
                  net_entries, net_all_listed ? "" : " and more");
         EMIT("EFI network boot", CHECK_WARN, detail);
-    } else if (unreadable > 0 || order_capped || unclassified > 0) {
-        EMIT_SKIP("EFI network boot", SKIP_OUTPUT_UNPARSEABLE, "boot order not fully inspected; network presence unconfirmed");
+    } else if (blocked[0] != '\0') {
+        char detail[BYTHOS_DETAIL_MAX];
+        compose_blocked_detail(detail, sizeof(detail), blocked, "network");
+        EMIT_SKIP("EFI network boot", SKIP_OUTPUT_UNPARSEABLE, detail);
     } else {
         EMIT("EFI network boot", CHECK_OK, "no active entry in EFI boot order");
     }
@@ -161,8 +275,10 @@ static size_t check_efivars_boot(check_result_t *results, size_t max_results) {
         snprintf(detail, sizeof(detail), "active in EFI boot order: %s%s",
                  cd_entries, cd_all_listed ? "" : " and more");
         EMIT("EFI CD/DVD boot", CHECK_WARN, detail);
-    } else if (unreadable > 0 || order_capped || unclassified > 0) {
-        EMIT_SKIP("EFI CD/DVD boot", SKIP_OUTPUT_UNPARSEABLE, "boot order not fully inspected; CD/DVD presence unconfirmed");
+    } else if (blocked[0] != '\0') {
+        char detail[BYTHOS_DETAIL_MAX];
+        compose_blocked_detail(detail, sizeof(detail), blocked, "CD/DVD");
+        EMIT_SKIP("EFI CD/DVD boot", SKIP_OUTPUT_UNPARSEABLE, detail);
     } else {
         EMIT("EFI CD/DVD boot", CHECK_OK, "no active entry in EFI boot order");
     }
@@ -396,10 +512,11 @@ static size_t check_efivars_immutable(check_result_t *results, size_t max_result
 
     if (flags & (unsigned int)FS_IMMUTABLE_FL) {
         results[used++] = make_result("EFI BootOrder immutable", CHECK_OK,
-            "flag set");
+            "flag set; the kernel refuses BootOrder writes while it holds");
     } else {
         results[used++] = make_result("EFI BootOrder immutable", CHECK_WARN,
-            "flag not set");
+            "flag not set; the kernel does not refuse BootOrder writes; "
+            "the flag would refuse them all, intended ones included");
     }
     return used;
 }
