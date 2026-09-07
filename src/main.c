@@ -13,7 +13,7 @@ enum {
     BYTHOS_EXIT_USAGE = 2,
 };
 
-#define BYTHOS_VERSION "0.1.0"
+#define BYTHOS_VERSION "0.1.1"
 
 static void usage(const char *argv0) {
     printf(

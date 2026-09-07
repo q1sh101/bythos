@@ -19,7 +19,7 @@ bythos does not harden. It reads, classifies, prints, exits.
 
 ```text
 +-----------------------------------------------------------------------------------------+
-| BYTHOS 0.1.0                                                ~81 checks · 10 subgroups   |
+| BYTHOS 0.1.1                                                ~81 checks · 10 subgroups   |
 +----------------+-----------------+-----------------+-----------------+------------------+
 | Trust layer    | hardware        | firmware        | Secure Boot     | boot chain       |
 +================+=================+=================+=================+==================+
@@ -104,11 +104,11 @@ Ubuntu 22.04+, Fedora, Arch.
 
 ```bash
 # debian / ubuntu
-sudo apt install ./bythos_0.1.0_amd64.deb
+sudo apt install ./bythos_0.1.1_amd64.deb
 
 # any x86_64 linux
-tar -xzf bythos-v0.1.0-x86_64-linux.tar.gz
-cd bythos-v0.1.0-x86_64-linux
+tar -xzf bythos-v0.1.1-x86_64-linux.tar.gz
+cd bythos-v0.1.1-x86_64-linux
 sudo install -Dm 0755 bythos /usr/local/bin/bythos
 sudo install -Dm 0644 bythos.1 /usr/local/share/man/man1/bythos.1
 ```
